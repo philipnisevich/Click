@@ -1,0 +1,1746 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ShortcutButton Matrix</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+      min-height: 100vh;
+      color: #fff;
+      padding: 20px;
+    }
+
+    .container {
+      max-width: 900px;
+      margin: 0 auto;
+    }
+
+    header {
+      text-align: center;
+      margin-bottom: 30px;
+    }
+
+    h1 {
+      font-size: 2.2rem;
+      margin-bottom: 8px;
+      background: linear-gradient(90deg, #e94560, #ff6b6b);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    .subtitle {
+      color: #8892b0;
+      font-size: 1rem;
+    }
+
+    .card {
+      background: rgba(255, 255, 255, 0.05);
+      border-radius: 16px;
+      padding: 20px;
+      margin-bottom: 16px;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      backdrop-filter: blur(10px);
+      overflow: hidden;
+    }
+
+    .card h2 {
+      font-size: 1.1rem;
+      margin-bottom: 14px;
+      color: #ccd6f6;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .status-indicator {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 14px;
+      border-radius: 20px;
+      font-size: 0.85rem;
+      font-weight: 500;
+    }
+
+    .status-indicator.disconnected {
+      background: rgba(239, 68, 68, 0.2);
+      color: #f87171;
+    }
+
+    .status-indicator.connected {
+      background: rgba(34, 197, 94, 0.2);
+      color: #4ade80;
+    }
+
+    .status-indicator .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: currentColor;
+      animation: pulse 2s infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 10px 20px;
+      border: none;
+      border-radius: 8px;
+      font-size: 0.9rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+
+    .btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, #e94560, #ff6b6b);
+      color: white;
+    }
+
+    .btn-primary:hover:not(:disabled) {
+      transform: translateY(-1px);
+      box-shadow: 0 6px 20px rgba(233, 69, 96, 0.3);
+    }
+
+    .btn-blue {
+      background: linear-gradient(135deg, #3b82f6, #60a5fa);
+      color: white;
+    }
+
+    .btn-blue:hover:not(:disabled) {
+      transform: translateY(-1px);
+      box-shadow: 0 6px 20px rgba(59, 130, 246, 0.4);
+    }
+
+    .btn-blue.editing-current {
+      background: linear-gradient(135deg, #93c5fd, #dbeafe);
+      color: #0f172a;
+      box-shadow: 0 0 0 2px rgba(147, 197, 253, 0.55), 0 8px 20px rgba(191, 219, 254, 0.35);
+    }
+
+    .btn-blue.editing-pending-switch {
+      background: linear-gradient(135deg, #1e3a8a, #1d4ed8);
+      color: #dbeafe;
+      box-shadow: inset 0 0 0 1px rgba(147, 197, 253, 0.25);
+    }
+
+    .btn-secondary {
+      background: rgba(255, 255, 255, 0.1);
+      color: #ccd6f6;
+      border: 1px solid rgba(255, 255, 255, 0.2);
+    }
+
+    .btn-secondary:hover:not(:disabled) {
+      background: rgba(255, 255, 255, 0.2);
+    }
+
+    .btn-success {
+      background: linear-gradient(135deg, #10b981, #34d399);
+      color: white;
+    }
+
+    .btn-danger {
+      background: linear-gradient(135deg, #ef4444, #f87171);
+      color: white;
+    }
+
+    .btn-small {
+      padding: 8px 14px;
+      font-size: 0.8rem;
+    }
+
+    .btn-group {
+      display: flex;
+      gap: 10px;
+      margin-top: 14px;
+    }
+
+    .btn-group .btn {
+      flex: 1;
+    }
+
+    /* Button Matrix Grid */
+    .button-matrix {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 10px;
+      margin-bottom: 16px;
+    }
+
+    .matrix-btn {
+      aspect-ratio: 1;
+      min-width: 0;
+      background: rgba(255, 255, 255, 0.08);
+      border: 2px solid rgba(255, 255, 255, 0.15);
+      border-radius: 12px;
+      cursor: pointer;
+      transition: all 0.2s;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 8px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .matrix-btn:hover {
+      background: rgba(255, 255, 255, 0.12);
+      border-color: rgba(255, 255, 255, 0.3);
+    }
+
+    .matrix-btn.selected {
+      border-color: #e94560;
+      background: rgba(233, 69, 96, 0.2);
+      box-shadow: 0 0 25px rgba(233, 69, 96, 0.4);
+      transform: scale(1.05);
+    }
+
+    .matrix-btn.has-shortcut {
+      border-color: rgba(16, 185, 129, 0.5);
+      background: rgba(16, 185, 129, 0.1);
+    }
+
+    .matrix-btn.has-shortcut.selected {
+      border-color: #e94560;
+      background: rgba(233, 69, 96, 0.15);
+    }
+
+    .matrix-btn.pressed {
+      animation: button-flash 0.3s ease;
+    }
+
+    @keyframes button-flash {
+      0%, 100% { background: rgba(255, 255, 255, 0.08); }
+      50% { background: rgba(34, 197, 94, 0.5); }
+    }
+
+    .matrix-btn .btn-num {
+      font-size: 1.2rem;
+      font-weight: 700;
+      color: #ccd6f6;
+    }
+
+    .matrix-btn .btn-status {
+      font-size: 0.65rem;
+      color: #64748b;
+      margin-top: 4px;
+      text-align: center;
+      max-width: 100%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .matrix-btn.has-shortcut .btn-status {
+      color: #4ade80;
+    }
+
+    .selected-info {
+      background: rgba(59, 130, 246, 0.15);
+      border: 1px solid rgba(59, 130, 246, 0.4);
+      border-radius: 8px;
+      padding: 12px;
+      margin-bottom: 16px;
+      text-align: center;
+    }
+
+    .selected-info .label {
+      color: #8892b0;
+      font-size: 0.8rem;
+    }
+
+    .selected-info .value {
+      color: #60a5fa;
+      font-size: 1.3rem;
+      font-weight: 700;
+      font-family: Georgia, 'Times New Roman', serif;
+    }
+
+    .name-input-container {
+      background: rgba(0, 0, 0, 0.2);
+      border-radius: 8px;
+      padding: 10px 12px;
+      margin-bottom: 12px;
+    }
+
+    .name-input-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 8px;
+    }
+
+    .name-input-row.second-line {
+      margin-top: 8px;
+    }
+
+    #second-line-row.hidden {
+      display: none;
+    }
+
+    .name-input-row label {
+      color: #8892b0;
+      font-size: 0.9rem;
+      white-space: nowrap;
+      min-width: 95px;
+    }
+
+    .name-input-row input {
+      flex: 1;
+      padding: 8px 12px;
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      border-radius: 6px;
+      background: rgba(0, 0, 0, 0.3);
+      color: #fff;
+      font-size: 1rem;
+      max-width: 120px;
+    }
+
+    .name-input-row input:focus {
+      outline: none;
+      border-color: #e94560;
+    }
+
+    .name-input-row input:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .char-count {
+      color: #8892b0;
+      font-size: 0.8rem;
+      min-width: 30px;
+    }
+
+    .btn-add-line {
+      background: rgba(255, 255, 255, 0.1);
+      color: #8892b0;
+      border: 1px dashed rgba(255, 255, 255, 0.2);
+      padding: 6px 12px;
+      font-size: 0.8rem;
+      margin-top: 0;
+      margin-left: 110px;
+    }
+
+    .btn-add-line:hover:not(:disabled):not(.inactive) {
+      background: rgba(255, 255, 255, 0.15);
+      color: #fff;
+    }
+
+    .btn-add-line.inactive {
+      cursor: not-allowed;
+      opacity: 0.5;
+    }
+
+    .btn-remove-line {
+      background: rgba(239, 68, 68, 0.3);
+      color: #f87171;
+      border: none;
+      padding: 4px 8px;
+      font-size: 1rem;
+      line-height: 1;
+    }
+
+    .btn-remove-line:hover {
+      background: rgba(239, 68, 68, 0.5);
+    }
+
+    /* Command Builder */
+    .command-builder {
+      background: rgba(0, 0, 0, 0.3);
+      border-radius: 10px;
+      padding: 16px;
+      overflow: hidden;
+    }
+
+    .command-steps {
+      max-height: 200px;
+      overflow: auto;
+      margin-bottom: 10px;
+    }
+
+    .command-steps:empty,
+    .command-steps:has(.empty-state) {
+      margin-bottom: 6px;
+    }
+
+    .command-step {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: rgba(255, 255, 255, 0.08);
+      padding: 8px 12px;
+      border-radius: 6px;
+      margin-bottom: 6px;
+      font-size: 0.85rem;
+      min-width: 0;
+      overflow: hidden;
+    }
+
+    .command-step .step-num {
+      background: rgba(255, 255, 255, 0.1);
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.7rem;
+      color: #8892b0;
+    }
+
+    .command-step .step-action {
+      padding: 3px 8px;
+      border-radius: 4px;
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
+
+    .command-step .step-action.press {
+      background: rgba(34, 197, 94, 0.3);
+      color: #4ade80;
+    }
+
+    .command-step .step-action.release {
+      background: rgba(245, 158, 11, 0.3);
+      color: #fbbf24;
+    }
+
+    .command-step .step-action.type {
+      background: rgba(139, 92, 246, 0.3);
+      color: #a78bfa;
+    }
+
+    .command-step .step-key {
+      font-family: 'Courier New', monospace;
+      font-weight: 600;
+      color: #ccd6f6;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      min-width: 0;
+    }
+
+    .command-step .remove-step {
+      margin-left: auto;
+      background: none;
+      border: none;
+      color: #64748b;
+      cursor: pointer;
+      font-size: 1rem;
+      padding: 2px 6px;
+      border-radius: 4px;
+    }
+
+    .command-step .remove-step:hover {
+      background: rgba(239, 68, 68, 0.2);
+      color: #f87171;
+    }
+
+    .action-area {
+      position: relative;
+      min-height: 96px;
+    }
+
+    .action-buttons {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+
+    .dynamic-area {
+      height: 46px;
+      position: relative;
+    }
+
+    .btn-action {
+      flex: 1;
+      padding: 12px 16px;
+      font-size: 0.9rem;
+      border-radius: 8px;
+      transition: all 0.2s;
+    }
+
+    .btn-press {
+      background: linear-gradient(135deg, #10b981, #34d399);
+      color: white;
+      border: none;
+    }
+
+    .btn-press.active {
+      animation: pulse-green 1s infinite;
+    }
+
+    .btn-release {
+      background: linear-gradient(135deg, #f59e0b, #fbbf24);
+      color: white;
+      border: none;
+    }
+
+    .btn-release.active {
+      animation: pulse-orange 1s infinite;
+    }
+
+    .btn-type {
+      background: linear-gradient(135deg, #8b5cf6, #a78bfa);
+      color: white;
+      border: none;
+    }
+
+    @keyframes pulse-green {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.5); }
+      50% { box-shadow: 0 0 0 10px rgba(16, 185, 129, 0); }
+    }
+
+    @keyframes pulse-orange {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.5); }
+      50% { box-shadow: 0 0 0 10px rgba(245, 158, 11, 0); }
+    }
+
+    .hidden {
+      visibility: hidden;
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    /* For Program Button layout, hidden sections should not keep vertical space. */
+    #customize-prompt.hidden,
+    #customize-panel.hidden {
+      display: none;
+    }
+
+    .record-hint {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      background: rgba(233, 69, 96, 0.2);
+      border: 2px solid #e94560;
+      border-radius: 8px;
+      padding: 14px;
+      text-align: center;
+      color: #e94560;
+      font-weight: 600;
+      transition: opacity 0.15s, visibility 0.15s;
+    }
+
+    .record-hint:not(.hidden) {
+      animation: pulse-border 1s infinite;
+    }
+
+    @keyframes pulse-border {
+      0%, 100% { border-color: #e94560; }
+      50% { border-color: #ff6b6b; }
+    }
+
+    .type-input-area {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      transition: opacity 0.15s, visibility 0.15s;
+    }
+
+    .type-input-area.hidden {
+      display: flex;
+    }
+
+    .type-input-area input {
+      flex: 1;
+      padding: 10px 14px;
+      border-radius: 8px;
+      border: 2px solid rgba(139, 92, 246, 0.5);
+      background: rgba(0, 0, 0, 0.3);
+      color: #fff;
+      font-size: 0.9rem;
+      outline: none;
+    }
+
+    .type-input-area input:focus {
+      border-color: #a78bfa;
+    }
+
+    .validation-errors {
+      background: rgba(239, 68, 68, 0.15);
+      border: 1px solid rgba(239, 68, 68, 0.4);
+      border-radius: 8px;
+      padding: 10px 14px;
+      margin-bottom: 12px;
+      font-size: 0.8rem;
+      overflow: hidden;
+    }
+
+    .validation-errors.hidden {
+      display: none;
+    }
+
+    .validation-errors .error-title {
+      color: #f87171;
+      font-weight: 600;
+      margin-bottom: 6px;
+    }
+
+    .validation-errors .error-list {
+      color: #fca5a5;
+      padding-left: 18px;
+      margin: 0;
+      word-break: break-word;
+    }
+
+    .quick-shortcuts {
+      margin-top: 8px;
+      padding-top: 10px;
+      border-top: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    .quick-shortcuts h3 {
+      font-size: 0.85rem;
+      color: #8892b0;
+      margin-bottom: 10px;
+    }
+
+    .quick-btn-group {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    .quick-btn {
+      padding: 6px 12px;
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      border-radius: 6px;
+      color: #ccd6f6;
+      font-size: 0.8rem;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .quick-btn:hover {
+      background: rgba(255, 255, 255, 0.15);
+    }
+
+    .empty-state {
+      text-align: center;
+      color: #64748b;
+      padding: 8px;
+      font-style: italic;
+      font-size: 0.85rem;
+    }
+
+    .log {
+      background: rgba(0, 0, 0, 0.4);
+      border-radius: 8px;
+      padding: 10px;
+      font-family: 'Courier New', monospace;
+      font-size: 0.75rem;
+      max-height: 120px;
+      overflow-y: auto;
+      color: #64748b;
+    }
+
+    .log-entry {
+      padding: 3px 0;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .log-entry:last-child { border-bottom: none; }
+    .log-entry.info { color: #60a5fa; }
+    .log-entry.success { color: #4ade80; }
+    .log-entry.error { color: #f87171; }
+    .log-entry.warning { color: #fbbf24; }
+
+    .two-col {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      align-items: stretch;
+    }
+
+    .two-col > .card {
+      min-width: 0;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    @media (max-width: 700px) {
+      .two-col {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .not-supported {
+      text-align: center;
+      padding: 30px;
+      color: #f87171;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>ShortcutButton Matrix</h1>
+      <p class="subtitle">4x4 programmable keyboard shortcut pad</p>
+    </header>
+
+    <div id="not-supported" class="card not-supported" style="display: none;">
+      <h2>Browser Not Supported</h2>
+      <p>Web Serial API is not available. Please use Chrome, Edge, or Opera.</p>
+    </div>
+
+    <div id="main-content">
+      <!-- Connection -->
+      <div class="card">
+        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+          <div id="status" class="status-indicator disconnected">
+            <span class="dot"></span>
+            <span id="status-text">Disconnected</span>
+          </div>
+          <div style="display: flex; gap: 8px;">
+            <button id="connect-btn" class="btn btn-primary btn-small">Connect</button>
+            <button id="disconnect-btn" class="btn btn-secondary btn-small" disabled>Disconnect</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="two-col">
+        <!-- Button Matrix -->
+        <div class="card">
+          <h2>Button Matrix</h2>
+          <div id="button-matrix" class="button-matrix"></div>
+          <div class="btn-group" style="justify-content: space-between;">
+            <button id="clear-all-btn" class="btn btn-danger btn-small" disabled>Clear All</button>
+            <button id="customize-btn" class="btn btn-blue btn-small" disabled>Customize</button>
+          </div>
+        </div>
+
+        <!-- Command Builder -->
+        <div class="card">
+          <h2>Program Button</h2>
+          
+          <div id="customize-prompt" class="empty-state" style="padding: 16px;">
+            Select a button to customize
+          </div>
+
+          <div id="customize-panel" class="hidden">
+            <div id="selected-info" class="selected-info">
+              <div class="label">Selected:</div>
+              <div class="value" id="selected-btn-text">None</div>
+            </div>
+
+            <div class="name-input-container">
+            <div class="name-input-row">
+              <label>Display Name:</label>
+              <input type="text" id="shortcut-name-line1" maxlength="8" placeholder="Line 1" disabled />
+              <span class="char-count"><span id="name-char-count-1">0</span>/8</span>
+            </div>
+            <div class="name-input-row second-line hidden" id="second-line-row">
+              <label></label>
+              <input type="text" id="shortcut-name-line2" maxlength="8" placeholder="Line 2" disabled />
+              <span class="char-count"><span id="name-char-count-2">0</span>/8</span>
+              <button type="button" class="btn btn-small btn-remove-line" id="remove-line-btn">×</button>
+            </div>
+            <button type="button" class="btn btn-small btn-add-line" id="add-line-btn" disabled>+ Add 2nd Line</button>
+          </div>
+
+          <div class="command-builder">
+            <div id="command-steps" class="command-steps">
+              <div class="empty-state">Select a button, then add actions</div>
+            </div>
+
+            <div class="action-area">
+              <div class="action-buttons">
+                <button id="press-btn" class="btn btn-action btn-press" disabled>↓ Press</button>
+                <button id="release-btn" class="btn btn-action btn-release" disabled>↑ Release</button>
+                <button id="type-btn" class="btn btn-action btn-type" disabled>⌨ Type</button>
+              </div>
+
+              <div class="dynamic-area">
+                <div id="record-hint" class="record-hint hidden">
+                  <span id="record-hint-text">Press any key...</span>
+                </div>
+
+                <div id="type-input-area" class="type-input-area hidden">
+                  <input type="text" id="type-input" placeholder="Type your text..." />
+                  <button id="type-done-btn" class="btn btn-success btn-small">Done</button>
+                </div>
+              </div>
+            </div>
+
+            <div id="validation-errors" class="validation-errors hidden"></div>
+
+            <div class="quick-shortcuts">
+              <h3>Quick Add:</h3>
+              <div class="quick-btn-group">
+                <button class="quick-btn" data-shortcut="copy">Cmd+C</button>
+                <button class="quick-btn" data-shortcut="paste">Cmd+V</button>
+                <button class="quick-btn" data-shortcut="cut">Cmd+X</button>
+                <button class="quick-btn" data-shortcut="undo">Cmd+Z</button>
+                <button class="quick-btn" data-shortcut="save">Cmd+S</button>
+                <button class="quick-btn" data-shortcut="find">Cmd+F</button>
+                <button class="quick-btn" data-shortcut="newtab">Cmd+T</button>
+                <button class="quick-btn" data-shortcut="spotlight">Cmd+Space</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="btn-group">
+            <button id="cancel-btn" class="btn btn-secondary" disabled>Cancel</button>
+            <button id="save-btn" class="btn btn-primary" disabled>Save</button>
+            <button id="test-btn" class="btn btn-secondary" disabled>Test</button>
+            <button id="clear-btn" class="btn btn-danger" disabled>Clear</button>
+          </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Log -->
+      <div class="card">
+        <h2>Activity Log</h2>
+        <div id="log" class="log">
+          <div class="log-entry info">Ready to connect...</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    if (!('serial' in navigator)) {
+      document.getElementById('not-supported').style.display = 'block';
+      document.getElementById('main-content').style.display = 'none';
+    }
+
+    // DOM Elements
+    const connectBtn = document.getElementById('connect-btn');
+    const disconnectBtn = document.getElementById('disconnect-btn');
+    const clearAllBtn = document.getElementById('clear-all-btn');
+    const customizeBtn = document.getElementById('customize-btn');
+    const customizePanel = document.getElementById('customize-panel');
+    const customizePrompt = document.getElementById('customize-prompt');
+    const saveBtn = document.getElementById('save-btn');
+    const cancelBtn = document.getElementById('cancel-btn');
+    const testBtn = document.getElementById('test-btn');
+    const clearBtn = document.getElementById('clear-btn');
+    const statusIndicator = document.getElementById('status');
+    const statusText = document.getElementById('status-text');
+    const buttonMatrixEl = document.getElementById('button-matrix');
+    const selectedBtnText = document.getElementById('selected-btn-text');
+    const commandStepsContainer = document.getElementById('command-steps');
+    const pressBtn = document.getElementById('press-btn');
+    const releaseBtn = document.getElementById('release-btn');
+    const typeBtn = document.getElementById('type-btn');
+    const recordHint = document.getElementById('record-hint');
+    const recordHintText = document.getElementById('record-hint-text');
+    const typeInputArea = document.getElementById('type-input-area');
+    const typeInput = document.getElementById('type-input');
+    const typeDoneBtn = document.getElementById('type-done-btn');
+    const validationErrors = document.getElementById('validation-errors');
+    const logContainer = document.getElementById('log');
+
+    // State
+    let port = null;
+    let reader = null;
+    let writer = null;
+    let isConnected = false;
+    let readLoopRunning = false;
+    let selectedButton = null;
+    let panelButton = null;
+    let commandSteps = [];
+    let recordingMode = null;
+    let buttonShortcuts = new Array(16).fill(null).map(() => []);
+    let buttonNames = new Array(16).fill('');
+
+    // Constants
+    const STEP_PRESS = 1;
+    const STEP_RELEASE = 2;
+    const STEP_TYPE = 3;
+    const KEY_TYPE_REGULAR = 0;
+    const KEY_TYPE_MODIFIER = 128;
+
+    // Key mappings
+    const keyMap = {
+      cmd: { hid: 0x08, display: '⌘ Cmd', isModifier: true },
+      ctrl: { hid: 0x01, display: 'Ctrl', isModifier: true },
+      shift: { hid: 0x02, display: 'Shift', isModifier: true },
+      alt: { hid: 0x04, display: 'Alt', isModifier: true },
+      a: { hid: 4, display: 'A' }, b: { hid: 5, display: 'B' }, c: { hid: 6, display: 'C' },
+      d: { hid: 7, display: 'D' }, e: { hid: 8, display: 'E' }, f: { hid: 9, display: 'F' },
+      g: { hid: 10, display: 'G' }, h: { hid: 11, display: 'H' }, i: { hid: 12, display: 'I' },
+      j: { hid: 13, display: 'J' }, k: { hid: 14, display: 'K' }, l: { hid: 15, display: 'L' },
+      m: { hid: 16, display: 'M' }, n: { hid: 17, display: 'N' }, o: { hid: 18, display: 'O' },
+      p: { hid: 19, display: 'P' }, q: { hid: 20, display: 'Q' }, r: { hid: 21, display: 'R' },
+      s: { hid: 22, display: 'S' }, t: { hid: 23, display: 'T' }, u: { hid: 24, display: 'U' },
+      v: { hid: 25, display: 'V' }, w: { hid: 26, display: 'W' }, x: { hid: 27, display: 'X' },
+      y: { hid: 28, display: 'Y' }, z: { hid: 29, display: 'Z' },
+      '1': { hid: 30, display: '1' }, '2': { hid: 31, display: '2' }, '3': { hid: 32, display: '3' },
+      '4': { hid: 33, display: '4' }, '5': { hid: 34, display: '5' }, '6': { hid: 35, display: '6' },
+      '7': { hid: 36, display: '7' }, '8': { hid: 37, display: '8' }, '9': { hid: 38, display: '9' },
+      '0': { hid: 39, display: '0' },
+      enter: { hid: 40, display: 'Enter' }, esc: { hid: 41, display: 'Esc' },
+      backspace: { hid: 42, display: 'Bksp' }, tab: { hid: 43, display: 'Tab' },
+      space: { hid: 44, display: 'Space' }, minus: { hid: 45, display: '-' },
+      equals: { hid: 46, display: '=' }, lbracket: { hid: 47, display: '[' },
+      rbracket: { hid: 48, display: ']' }, backslash: { hid: 49, display: '\\' },
+      semicolon: { hid: 51, display: ';' }, quote: { hid: 52, display: "'" },
+      grave: { hid: 53, display: '`' }, comma: { hid: 54, display: ',' },
+      period: { hid: 55, display: '.' }, slash: { hid: 56, display: '/' },
+      f1: { hid: 58, display: 'F1' }, f2: { hid: 59, display: 'F2' }, f3: { hid: 60, display: 'F3' },
+      f4: { hid: 61, display: 'F4' }, f5: { hid: 62, display: 'F5' }, f6: { hid: 63, display: 'F6' },
+      f7: { hid: 64, display: 'F7' }, f8: { hid: 65, display: 'F8' }, f9: { hid: 66, display: 'F9' },
+      f10: { hid: 67, display: 'F10' }, f11: { hid: 68, display: 'F11' }, f12: { hid: 69, display: 'F12' },
+      right: { hid: 79, display: '→' }, left: { hid: 80, display: '←' },
+      down: { hid: 81, display: '↓' }, up: { hid: 82, display: '↑' },
+      home: { hid: 74, display: 'Home' }, end: { hid: 77, display: 'End' },
+      pageup: { hid: 75, display: 'PgUp' }, pagedown: { hid: 78, display: 'PgDn' },
+      delete: { hid: 76, display: 'Del' },
+    };
+
+    const keyCodeToKeyName = {
+      91: 'cmd', 93: 'cmd', 224: 'cmd', 17: 'ctrl', 16: 'shift', 18: 'alt',
+      65: 'a', 66: 'b', 67: 'c', 68: 'd', 69: 'e', 70: 'f', 71: 'g', 72: 'h', 73: 'i',
+      74: 'j', 75: 'k', 76: 'l', 77: 'm', 78: 'n', 79: 'o', 80: 'p', 81: 'q', 82: 'r',
+      83: 's', 84: 't', 85: 'u', 86: 'v', 87: 'w', 88: 'x', 89: 'y', 90: 'z',
+      48: '0', 49: '1', 50: '2', 51: '3', 52: '4', 53: '5', 54: '6', 55: '7', 56: '8', 57: '9',
+      112: 'f1', 113: 'f2', 114: 'f3', 115: 'f4', 116: 'f5', 117: 'f6',
+      118: 'f7', 119: 'f8', 120: 'f9', 121: 'f10', 122: 'f11', 123: 'f12',
+      13: 'enter', 27: 'esc', 8: 'backspace', 9: 'tab', 32: 'space',
+      189: 'minus', 173: 'minus', 187: 'equals', 61: 'equals',
+      219: 'lbracket', 221: 'rbracket', 220: 'backslash',
+      186: 'semicolon', 59: 'semicolon', 222: 'quote', 192: 'grave',
+      188: 'comma', 190: 'period', 191: 'slash',
+      37: 'left', 38: 'up', 39: 'right', 40: 'down',
+      36: 'home', 35: 'end', 33: 'pageup', 34: 'pagedown', 46: 'delete',
+    };
+
+    const quickShortcuts = {
+      copy: [{ action: 'press', key: 'cmd' }, { action: 'press', key: 'c' }, { action: 'release', key: 'c' }, { action: 'release', key: 'cmd' }],
+      paste: [{ action: 'press', key: 'cmd' }, { action: 'press', key: 'v' }, { action: 'release', key: 'v' }, { action: 'release', key: 'cmd' }],
+      cut: [{ action: 'press', key: 'cmd' }, { action: 'press', key: 'x' }, { action: 'release', key: 'x' }, { action: 'release', key: 'cmd' }],
+      undo: [{ action: 'press', key: 'cmd' }, { action: 'press', key: 'z' }, { action: 'release', key: 'z' }, { action: 'release', key: 'cmd' }],
+      save: [{ action: 'press', key: 'cmd' }, { action: 'press', key: 's' }, { action: 'release', key: 's' }, { action: 'release', key: 'cmd' }],
+      find: [{ action: 'press', key: 'cmd' }, { action: 'press', key: 'f' }, { action: 'release', key: 'f' }, { action: 'release', key: 'cmd' }],
+      newtab: [{ action: 'press', key: 'cmd' }, { action: 'press', key: 't' }, { action: 'release', key: 't' }, { action: 'release', key: 'cmd' }],
+      spotlight: [{ action: 'press', key: 'cmd' }, { action: 'press', key: 'space' }, { action: 'release', key: 'space' }, { action: 'release', key: 'cmd' }],
+    };
+
+    // Initialize button matrix
+    function initButtonMatrix() {
+      buttonMatrixEl.innerHTML = '';
+      for (let i = 0; i < 16; i++) {
+        const btn = document.createElement('div');
+        btn.className = 'matrix-btn';
+        btn.dataset.index = i;
+        btn.innerHTML = `
+          <span class="btn-num">${i + 1}</span>
+          <span class="btn-status">Empty</span>
+        `;
+        btn.addEventListener('click', () => selectButton(i));
+        buttonMatrixEl.appendChild(btn);
+      }
+    }
+
+    function updateButtonDisplay(index) {
+      const btn = buttonMatrixEl.children[index];
+      const hasShortcut = buttonShortcuts[index] && buttonShortcuts[index].length > 0;
+      const name = buttonNames[index];
+      
+      btn.classList.toggle('has-shortcut', hasShortcut);
+      
+      const statusEl = btn.querySelector('.btn-status');
+      if (name && name.length > 0) {
+        statusEl.textContent = name;
+      } else if (hasShortcut) {
+        statusEl.textContent = getShortcutSummary(buttonShortcuts[index]);
+      } else {
+        statusEl.textContent = 'Empty';
+      }
+    }
+
+    function getShortcutSummary(steps) {
+      if (!steps || steps.length === 0) return 'Empty';
+      
+      const parts = [];
+      for (const step of steps) {
+        if (step.action === 'type') {
+          parts.push(`"${step.text.substring(0, 8)}..."`);
+          break;
+        } else if (step.action === 'press') {
+          const keyInfo = keyMap[step.key];
+          if (keyInfo) parts.push(keyInfo.display);
+        }
+      }
+      return parts.slice(0, 3).join('+') || 'Mapped';
+    }
+
+    function selectButton(index) {
+      selectedButton = index;
+      
+      // Update visual selection
+      document.querySelectorAll('.matrix-btn').forEach((btn, i) => {
+        btn.classList.toggle('selected', i === index);
+      });
+      
+      // Enable customize button
+      customizeBtn.disabled = !isConnected;
+      
+      // Update prompt to show which button is selected
+      customizePrompt.textContent = `Button ${index + 1} selected - click Customize to edit`;
+      updateCustomizeButtonStyle();
+    }
+
+    function showCustomizePanel() {
+      if (selectedButton === null) return;
+      
+      // Hide prompt, show panel
+      customizePrompt.classList.add('hidden');
+      customizePanel.classList.remove('hidden');
+      panelButton = selectedButton;
+      
+      selectedBtnText.textContent = `Button ${selectedButton + 1}`;
+      
+      // Load existing shortcut for this button
+      commandSteps = buttonShortcuts[selectedButton] ? [...buttonShortcuts[selectedButton]] : [];
+      renderCommandSteps();
+      updateButtonState();
+      
+      // Load name for this button (two lines)
+      setDisplayName(buttonNames[selectedButton] || '');
+      document.getElementById('shortcut-name-line1').disabled = false;
+      const addLineBtn = document.getElementById('add-line-btn');
+      addLineBtn.disabled = false;
+      // Set inactive state based on whether line 1 has content
+      const line1Val = document.getElementById('shortcut-name-line1').value.trim();
+      if (line1Val.length > 0) {
+        addLineBtn.classList.remove('inactive');
+      } else {
+        addLineBtn.classList.add('inactive');
+      }
+      
+      stopRecording();
+      hideTypeInput();
+      updateCustomizeButtonStyle();
+    }
+
+    function hideCustomizePanel() {
+      customizePanel.classList.add('hidden');
+      customizePrompt.classList.remove('hidden');
+      customizePrompt.textContent = 'Select a button to customize';
+      panelButton = null;
+      updateCustomizeButtonStyle();
+    }
+
+    function updateCustomizeButtonStyle() {
+      const panelOpen = !customizePanel.classList.contains('hidden');
+      const editingCurrent = panelButton !== null && panelOpen && selectedButton === panelButton;
+      const editingPendingSwitch = panelButton !== null && panelOpen && selectedButton !== null && selectedButton !== panelButton;
+      customizeBtn.classList.toggle('editing-current', editingCurrent);
+      customizeBtn.classList.toggle('editing-pending-switch', editingPendingSwitch);
+    }
+
+    function updateNameCharCount() {
+      const line1 = document.getElementById('shortcut-name-line1');
+      const line2 = document.getElementById('shortcut-name-line2');
+      const count1 = document.getElementById('name-char-count-1');
+      const count2 = document.getElementById('name-char-count-2');
+      count1.textContent = line1.value.length;
+      count2.textContent = line2.value.length;
+    }
+
+    function showSecondLine() {
+      document.getElementById('second-line-row').classList.remove('hidden');
+      document.getElementById('add-line-btn').classList.add('hidden');
+      document.getElementById('shortcut-name-line2').disabled = false;
+    }
+
+    function hideSecondLine() {
+      document.getElementById('second-line-row').classList.add('hidden');
+      document.getElementById('add-line-btn').classList.remove('hidden');
+      document.getElementById('shortcut-name-line2').value = '';
+      document.getElementById('shortcut-name-line2').disabled = true;
+      updateNameCharCount();
+    }
+
+    function getDisplayName() {
+      const line1 = document.getElementById('shortcut-name-line1').value.trim();
+      const line2 = document.getElementById('shortcut-name-line2').value.trim();
+      if (line2) {
+        // Pad line1 to exactly 8 chars so split works correctly when loading
+        const paddedLine1 = line1.substring(0, 8).padEnd(8, ' ');
+        return paddedLine1 + line2.substring(0, 8);
+      }
+      return line1.substring(0, 8);
+    }
+
+    function setDisplayName(name) {
+      const line1Input = document.getElementById('shortcut-name-line1');
+      const line2Input = document.getElementById('shortcut-name-line2');
+      
+      if (name.length > 8) {
+        // Split at 8, trim spaces from each line
+        const line1 = name.substring(0, 8).trim();
+        const line2 = name.substring(8, 16).trim();
+        line1Input.value = line1;
+        line2Input.value = line2;
+        if (line2) {
+          showSecondLine();
+        } else {
+          hideSecondLine();
+        }
+      } else {
+        line1Input.value = name.trim();
+        line2Input.value = '';
+        hideSecondLine();
+      }
+      updateNameCharCount();
+    }
+
+    function flashButton(index) {
+      const btn = buttonMatrixEl.children[index];
+      btn.classList.add('pressed');
+      setTimeout(() => btn.classList.remove('pressed'), 300);
+    }
+
+    // Logging
+    function log(message, type = 'info') {
+      const entry = document.createElement('div');
+      entry.className = `log-entry ${type}`;
+      entry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+      logContainer.appendChild(entry);
+      logContainer.scrollTop = logContainer.scrollHeight;
+    }
+
+    // Connection
+    let readableStreamClosed;
+    let writableStreamClosed;
+
+    async function connect() {
+      try {
+        port = await navigator.serial.requestPort();
+        await port.open({ baudRate: 115200 });
+        
+        // Listen for physical disconnection
+        port.addEventListener('disconnect', handleDisconnect);
+        
+        const textDecoder = new TextDecoderStream();
+        readableStreamClosed = port.readable.pipeTo(textDecoder.writable);
+        reader = textDecoder.readable.getReader();
+
+        const textEncoder = new TextEncoderStream();
+        writableStreamClosed = textEncoder.readable.pipeTo(port.writable);
+        writer = textEncoder.writable.getWriter();
+
+        isConnected = true;
+        updateConnectionStatus(true);
+        log('Connected to device', 'success');
+
+        readLoop();
+        setTimeout(() => sendCommand('GETALL'), 500);
+      } catch (error) {
+        log(`Connection failed: ${error.message}`, 'error');
+      }
+    }
+
+    function handleDisconnect() {
+      log('Device physically disconnected', 'warning');
+      cleanup();
+    }
+
+    function cleanup() {
+      readLoopRunning = false;
+      reader = null;
+      writer = null;
+      port = null;
+      isConnected = false;
+      updateConnectionStatus(false);
+      
+      // Reset all button presets when disconnected
+      for (let i = 0; i < 16; i++) {
+        buttonShortcuts[i] = [];
+        buttonNames[i] = '';
+        updateButtonDisplay(i);
+      }
+      
+      // Clear current editing state
+      selectedButton = null;
+      commandSteps = [];
+      renderCommandSteps();
+      updateButtonState();
+      
+      // Reset name inputs
+      document.getElementById('shortcut-name-line1').value = '';
+      document.getElementById('shortcut-name-line1').disabled = true;
+      document.getElementById('shortcut-name-line2').value = '';
+      document.getElementById('shortcut-name-line2').disabled = true;
+      const addLineBtnClean = document.getElementById('add-line-btn');
+      addLineBtnClean.disabled = true;
+      addLineBtnClean.classList.add('inactive');
+      hideSecondLine();
+      updateNameCharCount();
+      
+      selectedBtnText.textContent = 'None';
+      document.querySelectorAll('.matrix-btn').forEach(btn => btn.classList.remove('selected'));
+      
+      // Hide customize panel
+      hideCustomizePanel();
+      customizeBtn.disabled = true;
+    }
+
+    async function disconnect() {
+      if (!isConnected || !port) {
+        cleanup();
+        return;
+      }
+      
+      try {
+        readLoopRunning = false;
+        
+        // Close reader first
+        if (reader) {
+          await reader.cancel();
+          await readableStreamClosed.catch(() => {});
+          reader = null;
+        }
+        
+        // Close writer
+        if (writer) {
+          await writer.close();
+          await writableStreamClosed.catch(() => {});
+          writer = null;
+        }
+        
+        // Close port
+        if (port) {
+          port.removeEventListener('disconnect', handleDisconnect);
+          await port.close();
+          port = null;
+        }
+        
+        isConnected = false;
+        updateConnectionStatus(false);
+        log('Disconnected', 'warning');
+        cleanup();
+      } catch (error) {
+        log(`Disconnect error: ${error.message}`, 'error');
+        cleanup();
+      }
+    }
+
+    async function readLoop() {
+      readLoopRunning = true;
+      let buffer = '';
+
+      while (readLoopRunning && reader) {
+        try {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buffer += value;
+          
+          let startIdx, endIdx;
+          while ((startIdx = buffer.indexOf('<')) !== -1 && 
+                 (endIdx = buffer.indexOf('>', startIdx)) !== -1) {
+            const message = buffer.substring(startIdx + 1, endIdx);
+            buffer = buffer.substring(endIdx + 1);
+            processMessage(message);
+          }
+        } catch (error) {
+          if (readLoopRunning) {
+            log(`Connection lost`, 'error');
+            cleanup();
+          }
+          break;
+        }
+      }
+    }
+
+    function processMessage(message) {
+      if (message === 'READY') {
+        log('Device ready (SD card OK)', 'success');
+      } else if (message === 'READY_NOSD') {
+        log('Device ready (NO SD CARD!)', 'error');
+      } else if (message === 'SD:OK') {
+        log('SD card: OK', 'success');
+      } else if (message === 'SD:ERROR') {
+        log('SD card: ERROR - check connection', 'error');
+      } else if (message === 'OK') {
+        log('Saved successfully!', 'success');
+        if (selectedButton !== null) {
+          buttonShortcuts[selectedButton] = [...commandSteps];
+          updateButtonDisplay(selectedButton);
+          clearSteps();
+        }
+      } else if (message === 'CLEARED') {
+        log('Button cleared', 'warning');
+        if (selectedButton !== null) {
+          buttonShortcuts[selectedButton] = [];
+          buttonNames[selectedButton] = '';
+          updateButtonDisplay(selectedButton);
+          clearSteps();
+        }
+      } else if (message === 'CLEAREDALL') {
+        log('All buttons cleared', 'warning');
+        for (let i = 0; i < 16; i++) {
+          buttonShortcuts[i] = [];
+          buttonNames[i] = '';
+          updateButtonDisplay(i);
+        }
+        clearSteps();
+      } else if (message === 'DONE') {
+        log('All shortcuts loaded', 'success');
+      } else if (message === 'TESTED') {
+        log('Shortcut executed', 'info');
+      } else if (message.startsWith('PRESSED:')) {
+        const btnIdx = parseInt(message.substring(8));
+        log(`Button ${btnIdx + 1} pressed`, 'success');
+        flashButton(btnIdx);
+      } else if (message.startsWith('STEPS:')) {
+        parseShortcutResponse(message.substring(6));
+      } else if (message.startsWith('DEBUG:')) {
+        log('[DBG] ' + message.substring(6), 'warning');
+      } else if (message.startsWith('ERROR:')) {
+        log('[ERR] ' + message.substring(6), 'error');
+      } else if (message.startsWith('PONG')) {
+        log('Device responding', 'success');
+      } else {
+        log('[?] ' + message, 'info');
+      }
+    }
+
+    function parseShortcutResponse(data) {
+      // Format: buttonIndex:name:stepsData
+      const firstColon = data.indexOf(':');
+      if (firstColon === -1) return;
+      
+      const btnIdx = parseInt(data.substring(0, firstColon));
+      if (btnIdx < 0 || btnIdx >= 16) return;
+      
+      const secondColon = data.indexOf(':', firstColon + 1);
+      let name = '';
+      let stepsData = '';
+      
+      if (secondColon !== -1) {
+        name = data.substring(firstColon + 1, secondColon);
+        stepsData = data.substring(secondColon + 1);
+      } else {
+        stepsData = data.substring(firstColon + 1);
+      }
+      
+      // Store the name
+      buttonNames[btnIdx] = name;
+      
+      const steps = [];
+      if (stepsData.length > 0) {
+        const parts = stepsData.split(';');
+        for (const part of parts) {
+          const commas = part.split(',');
+          const action = parseInt(commas[0]);
+          
+          if (action === STEP_TYPE && commas.length > 3) {
+            try {
+              const text = atob(commas[3]);
+              steps.push({ action: 'type', text });
+            } catch (e) {}
+          } else if (commas.length >= 3) {
+            const keyType = parseInt(commas[1]);
+            const keyCode = parseInt(commas[2]);
+            
+            // Reverse lookup
+            let keyName = null;
+            for (const [name, info] of Object.entries(keyMap)) {
+              if (info.isModifier && keyType === KEY_TYPE_MODIFIER && info.hid === keyCode) {
+                keyName = name;
+                break;
+              } else if (!info.isModifier && keyType === KEY_TYPE_REGULAR && info.hid === keyCode) {
+                keyName = name;
+                break;
+              }
+            }
+            
+            if (keyName) {
+              steps.push({ action: action === STEP_PRESS ? 'press' : 'release', key: keyName });
+            }
+          }
+        }
+      }
+      
+      buttonShortcuts[btnIdx] = steps;
+      updateButtonDisplay(btnIdx);
+    }
+
+    async function sendCommand(cmd) {
+      if (!writer) return;
+      try {
+        await writer.write(`<${cmd}>`);
+      } catch (error) {
+        log(`Send error: ${error.message}`, 'error');
+      }
+    }
+
+    function updateConnectionStatus(connected) {
+      statusIndicator.className = `status-indicator ${connected ? 'connected' : 'disconnected'}`;
+      statusText.textContent = connected ? 'Connected' : 'Disconnected';
+      connectBtn.disabled = connected;
+      disconnectBtn.disabled = !connected;
+      clearAllBtn.disabled = !connected;
+      customizeBtn.disabled = !connected || selectedButton === null;
+      if (!connected) {
+        panelButton = null;
+      }
+      updateCustomizeButtonStyle();
+      updateButtonState();
+    }
+
+    function updateButtonState() {
+      const hasSelection = selectedButton !== null;
+      const hasSteps = commandSteps.length > 0;
+      const validation = validateSteps();
+      const hasName = getDisplayName().trim().length > 0;
+      
+      pressBtn.disabled = !hasSelection;
+      releaseBtn.disabled = !hasSelection;
+      typeBtn.disabled = !hasSelection;
+      cancelBtn.disabled = !hasSteps;
+      saveBtn.disabled = !isConnected || !hasSelection || !hasSteps || !validation.valid || !hasName;
+      testBtn.disabled = !isConnected || !hasSelection;
+      clearBtn.disabled = !isConnected || !hasSelection;
+      
+      if (hasSteps && !validation.valid) {
+        showValidationErrors(validation.errors);
+      } else {
+        hideValidationErrors();
+      }
+    }
+
+    function validateSteps() {
+      const errors = [];
+      const pressedKeys = new Set();
+      
+      for (let i = 0; i < commandSteps.length; i++) {
+        const step = commandSteps[i];
+        if (step.action === 'type') continue;
+        
+        const keyInfo = keyMap[step.key];
+        const keyDisplay = keyInfo?.display || step.key;
+        
+        if (step.action === 'press') {
+          if (pressedKeys.has(step.key)) {
+            errors.push(`Step ${i + 1}: "${keyDisplay}" already pressed`);
+          } else {
+            pressedKeys.add(step.key);
+          }
+        } else {
+          if (!pressedKeys.has(step.key)) {
+            errors.push(`Step ${i + 1}: "${keyDisplay}" not pressed`);
+          } else {
+            pressedKeys.delete(step.key);
+          }
+        }
+      }
+      
+      if (pressedKeys.size > 0) {
+        const unreleased = Array.from(pressedKeys).map(k => keyMap[k]?.display || k);
+        errors.push(`Unreleased: ${unreleased.join(', ')}`);
+      }
+      
+      return { valid: errors.length === 0, errors };
+    }
+
+    function showValidationErrors(errors) {
+      validationErrors.innerHTML = `
+        <div class="error-title">Fix these issues:</div>
+        <ul class="error-list">${errors.map(e => `<li>${e}</li>`).join('')}</ul>
+      `;
+      validationErrors.classList.remove('hidden');
+    }
+
+    function hideValidationErrors() {
+      validationErrors.classList.add('hidden');
+    }
+
+    // Command Builder
+    function addStep(action, key) {
+      commandSteps.push({ action, key });
+      renderCommandSteps();
+      updateButtonState();
+    }
+
+    function removeStep(index) {
+      commandSteps.splice(index, 1);
+      renderCommandSteps();
+      updateButtonState();
+    }
+
+    function clearSteps() {
+      commandSteps = [];
+      renderCommandSteps();
+      updateButtonState();
+      hideValidationErrors();
+      
+      // Reset name inputs
+      document.getElementById('shortcut-name-line1').value = '';
+      document.getElementById('shortcut-name-line2').value = '';
+      hideSecondLine();
+      updateNameCharCount();
+    }
+
+    function renderCommandSteps() {
+      if (commandSteps.length === 0) {
+        commandStepsContainer.innerHTML = '<div class="empty-state">Add actions using buttons below</div>';
+        return;
+      }
+
+      commandStepsContainer.innerHTML = '';
+      commandSteps.forEach((step, index) => {
+        const stepEl = document.createElement('div');
+        stepEl.className = 'command-step';
+        
+        if (step.action === 'type') {
+          stepEl.innerHTML = `
+            <span class="step-num">${index + 1}</span>
+            <span class="step-action type">⌨ Type</span>
+            <span class="step-key">"${step.text}"</span>
+            <button class="remove-step" data-index="${index}">×</button>
+          `;
+        } else {
+          const keyInfo = keyMap[step.key] || { display: step.key };
+          stepEl.innerHTML = `
+            <span class="step-num">${index + 1}</span>
+            <span class="step-action ${step.action}">${step.action === 'press' ? '↓' : '↑'}</span>
+            <span class="step-key">${keyInfo.display}</span>
+            <button class="remove-step" data-index="${index}">×</button>
+          `;
+        }
+        commandStepsContainer.appendChild(stepEl);
+      });
+
+      commandStepsContainer.querySelectorAll('.remove-step').forEach(btn => {
+        btn.addEventListener('click', (e) => removeStep(parseInt(e.target.dataset.index)));
+      });
+    }
+
+    // Recording
+    function startRecording(mode) {
+      recordingMode = mode;
+      recordHint.classList.remove('hidden');
+      typeInputArea.classList.add('hidden');
+      recordHintText.textContent = mode === 'press' ? 'Press key to add PRESS...' : 'Press key to add RELEASE...';
+      pressBtn.classList.toggle('active', mode === 'press');
+      releaseBtn.classList.toggle('active', mode === 'release');
+    }
+
+    function stopRecording() {
+      recordingMode = null;
+      recordHint.classList.add('hidden');
+      pressBtn.classList.remove('active');
+      releaseBtn.classList.remove('active');
+    }
+
+    function showTypeInput() {
+      stopRecording();
+      typeInputArea.classList.remove('hidden');
+      typeInput.value = '';
+      typeInput.focus();
+    }
+
+    function hideTypeInput() {
+      typeInputArea.classList.add('hidden');
+    }
+
+    function addTypeStep() {
+      const text = typeInput.value;
+      if (text.length > 0) {
+        commandSteps.push({ action: 'type', text });
+        renderCommandSteps();
+        updateButtonState();
+      }
+      hideTypeInput();
+    }
+
+    function handleKeyCapture(e) {
+      if (!recordingMode) return;
+      e.preventDefault();
+      e.stopPropagation();
+      
+      const keyName = keyCodeToKeyName[e.keyCode];
+      if (!keyName) {
+        log(`Unknown key (code: ${e.keyCode})`, 'warning');
+        stopRecording();
+        return;
+      }
+      
+      addStep(recordingMode, keyName);
+      stopRecording();
+    }
+
+    // Save shortcut
+    async function saveShortcut() {
+      if (selectedButton === null) return;
+      
+      // If line 2 is empty, hide it before saving
+      const line2 = document.getElementById('shortcut-name-line2').value.trim();
+      if (!line2) {
+        hideSecondLine();
+      }
+      
+      const name = getDisplayName();
+      
+      const protocol = commandSteps.map(step => {
+        if (step.action === 'type') {
+          return `${STEP_TYPE},0,0,${btoa(step.text)}`;
+        } else {
+          const keyInfo = keyMap[step.key];
+          const action = step.action === 'press' ? STEP_PRESS : STEP_RELEASE;
+          const keyType = keyInfo.isModifier ? KEY_TYPE_MODIFIER : KEY_TYPE_REGULAR;
+          return `${action},${keyType},${keyInfo.hid}`;
+        }
+      }).join(';');
+      
+      // Format: STEPS:buttonIndex:name:data
+      await sendCommand(`STEPS:${selectedButton}:${name}:${protocol}`);
+      buttonNames[selectedButton] = name;
+      log(`Saving "${name || 'unnamed'}" to button ${selectedButton + 1}...`, 'info');
+    }
+
+    // Event Listeners
+    connectBtn.addEventListener('click', connect);
+    disconnectBtn.addEventListener('click', disconnect);
+    
+    clearAllBtn.addEventListener('click', () => {
+      if (confirm('Clear ALL button shortcuts?')) {
+        sendCommand('CLEARALL');
+      }
+    });
+    
+    customizeBtn.addEventListener('click', showCustomizePanel);
+
+    // Name inputs - filter to only display-compatible characters
+    // Display supports: space, A-Z, a-z, 0-9, ! " # $ % & ' ( ) * + , - . / ; = ? @
+    // Protocol breaks with: < > :
+    // Display can't show: [ ] { } \ ^ _ ` | ~
+    const nameCharFilter = /[^A-Za-z0-9 !"#$%&'()*+,\-.\/;=?@]/g;
+    
+    document.getElementById('shortcut-name-line1').addEventListener('input', function(e) {
+      this.value = this.value.replace(nameCharFilter, '');
+      updateNameCharCount();
+      updateButtonState();
+      // Update add-line button state
+      const addLineBtn = document.getElementById('add-line-btn');
+      if (this.value.trim().length > 0) {
+        addLineBtn.classList.remove('inactive');
+      } else {
+        addLineBtn.classList.add('inactive');
+      }
+    });
+    document.getElementById('shortcut-name-line2').addEventListener('input', function(e) {
+      this.value = this.value.replace(nameCharFilter, '');
+      updateButtonState();
+      updateNameCharCount();
+    });
+    
+    // Add/remove second line buttons
+    document.getElementById('add-line-btn').addEventListener('click', () => {
+      // Only allow adding second line if line 1 has text
+      const line1 = document.getElementById('shortcut-name-line1').value.trim();
+      if (line1.length > 0) {
+        showSecondLine();
+      }
+    });
+    document.getElementById('remove-line-btn').addEventListener('click', hideSecondLine);
+
+    pressBtn.addEventListener('click', () => {
+      hideTypeInput();
+      recordingMode === 'press' ? stopRecording() : startRecording('press');
+    });
+
+    releaseBtn.addEventListener('click', () => {
+      hideTypeInput();
+      recordingMode === 'release' ? stopRecording() : startRecording('release');
+    });
+
+    typeBtn.addEventListener('click', () => {
+      stopRecording();
+      showTypeInput();
+    });
+
+    typeDoneBtn.addEventListener('click', addTypeStep);
+    typeInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); addTypeStep(); }
+      e.stopPropagation();
+    });
+
+    cancelBtn.addEventListener('click', () => {
+      clearSteps();
+      stopRecording();
+      hideTypeInput();
+    });
+
+    saveBtn.addEventListener('click', saveShortcut);
+    
+    testBtn.addEventListener('click', () => {
+      if (selectedButton !== null) {
+        sendCommand(`TEST:${selectedButton}`);
+      }
+    });
+
+    clearBtn.addEventListener('click', () => {
+      if (selectedButton !== null) {
+        sendCommand(`CLEAR:${selectedButton}`);
+      }
+    });
+
+    document.querySelectorAll('.quick-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        if (selectedButton === null) return;
+        const steps = quickShortcuts[btn.dataset.shortcut];
+        if (steps) {
+          stopRecording();
+          hideTypeInput();
+          commandSteps = [...steps];
+          renderCommandSteps();
+          updateButtonState();
+        }
+      });
+    });
+
+    document.addEventListener('keydown', handleKeyCapture, true);
+
+    document.addEventListener('click', (e) => {
+      if (recordingMode && !e.target.closest('.action-buttons') && !e.target.closest('.record-hint')) {
+        stopRecording();
+      }
+    });
+
+    // Initialize
+    initButtonMatrix();
+  </script>
+</body>
+</html>
