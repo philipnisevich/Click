@@ -1,146 +1,173 @@
 # ShortcutButton Matrix
 
-A 4x4 programmable keyboard shortcut pad using Arduino Pro Micro. Map custom keyboard shortcuts to each of the 16 buttons via a web interface.
+A 4x4 programmable keyboard shortcut pad for **ESP32-S3**. Program shortcuts in the web UI, store them on SD card, and execute them as USB HID keyboard actions.
 
 ## Hardware Required
 
-- **Arduino Pro Micro** (ATmega32U4)
+- **ESP32-S3-DevKitC-1** (WROOM-1-N16R8, 16MB flash, 8MB PSRAM)
 - **4x4 Button Matrix** (16 buttons)
-- **SD Card Module** (SPI interface)
 - **ST7789 Display** (240x320, 2-inch TFT LCD)
+- **MicroSD Card Module** (SPI)
+- **SD card formatted FAT16/FAT32** (not exFAT)
 
 ## Wiring
 
 ### Button Matrix Connections
 
-| Matrix Pin | Arduino Pin |
-|------------|-------------|
-| Row 1      | Pin 9       |
-| Row 2      | Pin 8       |
-| Row 3      | Pin 7       |
-| Row 4      | Pin 6       |
-| Col 1      | Pin 5       |
-| Col 2      | Pin 4       |
-| Col 3      | Pin 3       |
-| Col 4      | Pin 2       |
+The 8 matrix pins are physically consecutive on J1 (left header, pins 4-11), so an 8-pin ribbon cable connects directly.
 
-### SD Card Module Connections
-
-| SD Module Pin | Arduino Pin |
-|---------------|-------------|
-| GND           | GND         |
-| 3.3V          | (not connected) |
-| 5V            | VCC         |
-| CS            | Pin 10      |
-| MOSI          | Pin 16      |
-| SCK           | Pin 15      |
-| MISO          | Pin 14      |
-| GND           | GND         |
+| Matrix Pin | GPIO | J1 Header Pin |
+|------------|------|---------------|
+| Row 1      | 4    | J1 pin 4      |
+| Row 2      | 5    | J1 pin 5      |
+| Row 3      | 6    | J1 pin 6      |
+| Row 4      | 7    | J1 pin 7      |
+| Col 1      | 15   | J1 pin 8      |
+| Col 2      | 16   | J1 pin 9      |
+| Col 3      | 17   | J1 pin 10     |
+| Col 4      | 18   | J1 pin 11     |
 
 ### ST7789 Display Connections
 
-| Display Pin | Arduino Pin | Notes |
-|-------------|-------------|-------|
-| GND         | GND         |       |
-| VCC         | VCC (5V)    |       |
-| SCL         | Pin 15      | Shared with SD card |
-| SDA         | Pin 16      | Shared with SD card |
-| RES         | A2          |       |
-| DC          | A1          |       |
-| CS          | A0          |       |
-| BLK         | VCC         | Backlight always on |
+Shares SPI bus with SD card.
 
-### SD Card Setup
+| Display Pin | GPIO | J1 Header Pin | Notes               |
+|-------------|------|---------------|---------------------|
+| GND         | -    | GND           |                     |
+| VCC         | -    | 3.3V          |                     |
+| SCL (SCK)   | 12   | J1 pin 18     | SPI clock           |
+| SDA (MOSI)  | 11   | J1 pin 17     | SPI data            |
+| RES (RST)   | 14   | J1 pin 20     | Hardware reset      |
+| DC          | 8    | J1 pin 12     | Data/command select |
+| CS          | 9    | J1 pin 15     | Chip select         |
+| BLK         | -    | 3.3V          | Backlight always on |
 
-1. **Format** your SD card as **FAT32** (or FAT16 for cards <2GB)
-   - **IMPORTANT: exFAT is NOT supported!** Must be FAT32 or FAT16
-   - On Mac: Disk Utility → Erase → Format: "MS-DOS (FAT)"
-   - On Windows: Right-click → Format → File system: FAT32
-2. Each button's shortcut is saved as `BTN00.DAT`, `BTN01.DAT`, etc. in the root directory
+### SD Card Module Connections
 
-### Button Layout (as seen from front)
+Shares SPI bus with display.
 
+| SD Pin | GPIO | J1 Header Pin | Notes            |
+|--------|------|---------------|------------------|
+| GND    | -    | GND           |                  |
+| VCC    | -    | 3.3V          |                  |
+| SCK    | 12   | J1 pin 18     | Shared SPI clock |
+| MOSI   | 11   | J1 pin 17     | Shared SPI data  |
+| MISO   | 13   | J1 pin 19     | SPI data return  |
+| CS     | 10   | J1 pin 16     | Chip select      |
+
+## Port Roles (Dual USB-C Boards)
+
+- **COM port**: Best for flashing and Serial Monitor.
+- **USB port**: Native ESP32-S3 USB (HID keyboard output).
+
+Recommended setup while testing:
+1. Keep **COM** connected for upload/logs.
+2. Keep **USB** connected to the target computer for keyboard output.
+
+## Arduino IDE Settings (Required)
+
+Use **Board: ESP32S3 Dev Module** and set:
+
+| Setting | Value |
+|--------|-------|
+| Upload Speed | 921600 (or 460800 if unstable) |
+| USB Mode | **USB-OTG (TinyUSB)** |
+| USB CDC On Boot | Enabled |
+| USB Firmware MSC On Boot | **Disabled** |
+| USB DFU On Boot | Disabled |
+| Upload Mode | UART0 / Hardware CDC (when flashing via COM) |
+| CPU Frequency | 240MHz (WiFi) |
+| Flash Mode | QIO 80MHz |
+| Flash Size | **16MB (128Mb)** |
+| Partition Scheme | Default 4MB with spiffs |
+| Core Debug Level | None |
+| PSRAM | **OPI PSRAM** |
+| Erase All Flash Before Sketch Upload | Disabled |
+
+Important:
+- If `USB Mode` is not `USB-OTG (TinyUSB)`, this firmware now fails compile on purpose.
+- HID keyboard output requires the cable on the **USB** (native) port.
+
+## Upload Instructions
+
+### Method A (recommended): flash via COM
+
+1. Connect board to **COM** port.
+2. Set `Upload Mode = UART0 / Hardware CDC`.
+3. Upload sketch.
+4. Connect board to **USB** port for HID keyboard behavior.
+
+### Method B: flash via USB port
+
+1. Connect board to **USB** port.
+2. Set `Upload Mode = USB-OTG CDC (TinyUSB)`.
+3. Upload sketch.
+
+If upload fails, hold **BOOT**, tap **RESET**, then upload again.
+
+## arduino-cli
+
+From repo root:
+
+```bash
+# Compile only
+arduino-cli compile \
+  --fqbn "esp32:esp32:esp32s3:USBMode=default,CDCOnBoot=cdc,MSCOnBoot=default,DFUOnBoot=default,UploadMode=default,FlashSize=16M,PSRAM=opi,PartitionScheme=default" \
+  ShortcutButton
+
+# Upload via COM port (recommended)
+arduino-cli compile --upload \
+  -p /dev/cu.usbserial-XXXX \
+  --fqbn "esp32:esp32:esp32s3:USBMode=default,CDCOnBoot=cdc,MSCOnBoot=default,DFUOnBoot=default,UploadMode=default,FlashSize=16M,PSRAM=opi,PartitionScheme=default" \
+  ShortcutButton
+
+# Upload via native USB port
+arduino-cli compile --upload \
+  -p /dev/cu.usbmodemXXXX \
+  --fqbn "esp32:esp32:esp32s3:USBMode=default,CDCOnBoot=cdc,MSCOnBoot=default,DFUOnBoot=default,UploadMode=cdc,FlashSize=16M,PSRAM=opi,PartitionScheme=default" \
+  ShortcutButton
 ```
-┌─────┬─────┬─────┬─────┐
-│  1  │  2  │  3  │  4  │  Row 1
-├─────┼─────┼─────┼─────┤
-│  5  │  6  │  7  │  8  │  Row 2
-├─────┼─────┼─────┼─────┤
-│  9  │ 10  │ 11  │ 12  │  Row 3
-├─────┼─────┼─────┼─────┤
-│ 13  │ 14  │ 15  │ 16  │  Row 4
-└─────┴─────┴─────┴─────┘
- Col1  Col2  Col3  Col4
+
+Find ports with:
+
+```bash
+arduino-cli board list
 ```
-
-## Arduino Setup
-
-1. Open `ShortcutButton.ino` in the Arduino IDE
-2. Select **Board**: `Arduino Leonardo` or `Arduino Micro`
-3. Select the correct **Port**
-4. Upload the sketch
 
 ## Web Interface
 
-Open `web/index.html` in Chrome, Edge, or Opera (requires Web Serial API).
+Open `ShortcutButton/web/index.html` in Chrome, Edge, or Opera.
 
-### Features
+Quick validation path:
+1. Connect in web UI.
+2. Click **Test HID**.
+3. Focus a text editor.
+4. Confirm `hello` is typed.
 
-- **Visual 4x4 Grid**: Click any button to select it for programming
-- **Display Name**: Give each shortcut a name (max 8 characters) to show on the LCD
-- **Three Action Types**:
-  - **Press**: Hold down a key
-  - **Release**: Release a key
-  - **Type**: Type out a text string
-- **Quick Shortcuts**: Pre-made common shortcuts (Cmd+C, Cmd+V, etc.)
-- **Validation**: Ensures all keys are released before saving
-- **Live Feedback**: See when physical buttons are pressed
-- **LCD Display**: Shows a 4x4 grid with each button's name
-
-## Usage
-
-1. **Connect** the Arduino via USB
-2. **Click "Connect"** in the web interface
-3. **Click a button** in the 4x4 grid to select it
-4. **Enter a display name** (max 8 characters) - shows on the LCD
-5. **Build your shortcut**:
-   - Click **↓ Press** then press a key
-   - Click **↑ Release** then press the same key
-   - Or click **⌨ Type** to enter text
-6. **Click "Save"** to program the button
-7. **Press the physical button** to trigger the shortcut
-
-## Example: Programming Cmd+C (Copy)
-
-1. Select button 1 in the grid
-2. Click **↓ Press** → Press Command key
-3. Click **↓ Press** → Press C key
-4. Click **↑ Release** → Press C key
-5. Click **↑ Release** → Press Command key
-6. Click **Save**
-
-Or just click the **Cmd+C** quick shortcut button!
-
-## Commands
-
-| Web Command | Description |
-|-------------|-------------|
-| `STEPS:n:name:data` | Set shortcut for button n with display name |
-| `GET:n` | Get shortcut for button n |
-| `GETALL` | Get all shortcuts |
-| `CLEAR:n` | Clear button n |
-| `CLEARALL` | Clear all buttons |
-| `TEST:n` | Execute button n's shortcut |
-| `SDSTATUS` | Check SD card status |
+Then program buttons and press physical keys to execute shortcuts.
 
 ## Storage
 
-All 16 shortcuts are stored on the SD card and persist across power cycles.
+Shortcut files are saved on SD card root:
+- `BTN00.DAT` ... `BTN15.DAT`
 
-- **Max steps per button**: 16
-- **Max text length per button**: 20 characters
-- **Max name length**: 8 characters
-- **Storage location**: `BTN00.DAT` - `BTN15.DAT` in root directory
+Limits:
+- Max steps per button: 16
+- Max text length: 20
+- Max display name length: 16
+
+Without SD card, keyboard can still run, but save/load will fail.
+
+## Troubleshooting
+
+- **Compiles with USB mode error**:
+  Set `USB Mode = USB-OTG (TinyUSB)`.
+- **Web UI connects but shortcuts do nothing**:
+  Make sure USB cable is on native **USB** port, not COM-only port.
+- **No keyboard output**:
+  Verify `USB CDC On Boot = Enabled`, `MSC On Boot = Disabled`, and native USB is connected.
+- **Shortcuts not persistent**:
+  Reformat SD to FAT32/FAT16 and reinsert before boot.
 
 ## License
 

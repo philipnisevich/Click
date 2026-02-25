@@ -1,30 +1,55 @@
 /*
-  ShortcutButton - Arduino Pro Micro
-  
-  A 4x4 button matrix that sends programmable keyboard shortcuts.
-  Connect to the web interface to build and map custom shortcuts for each button.
-  
+  ShortcutButton - ESP32-S3-DevKitC-1 (N16R8)
+
+  A 4x4 button matrix that sends programmable keyboard shortcuts via USB HID.
+  Connect to the web interface via the native USB port to build and map custom
+  shortcuts for each button.
+
   Hardware:
-  - Arduino Pro Micro (ATmega32U4)
-  - 4x4 Button Matrix (Pins 2-9)
-  - SD Card Module (SPI - Pins 10, 14-16)
-  - ST7789 Display (SPI shared, CS=A0, DC=A1, RES=A2)
-  
-  The shortcuts are stored on SD card and persist across power cycles.
+  - ESP32-S3-DevKitC-1 (WROOM-1-N16R8, 16MB flash, 8MB PSRAM)
+  - 4x4 Button Matrix (J1 pins 4-11: GPIO4-7 rows, GPIO15-18 cols)
+  - SD Card Module (SPI shared with display: CS=GPIO10, MOSI=11, SCK=12, MISO=13)
+  - ST7789 Display (SPI shared: CS=GPIO9, DC=GPIO8, RST=GPIO14)
+
+  Arduino IDE board settings:
+  - Board:            ESP32S3 Dev Module
+  - USB Mode:         USB-OTG (TinyUSB)
+  - USB CDC On Boot:  Enabled
+  - Flash Size:       16MB (128Mb)
+  - Partition Scheme: Default 4MB with spiffs (or any — SD card is external storage)
+
+  First upload: plug into the UART port and upload once.
+  Normal use: plug into the native USB port (labeled "USB").
+  The shortcuts are stored on the SD card and persist across power cycles.
 */
 
-#include <Keyboard.h>
+#ifndef ARDUINO_USB_MODE
+#error This ESP32 board has no native USB interface for HID keyboard
+#elif ARDUINO_USB_MODE != 0
+#error Set Tools -> USB Mode -> USB-OTG (TinyUSB)
+#endif
+
+#include "USB.h"
+#include "USBHIDKeyboard.h"
 #include <SPI.h>
 #include <SD.h>
 
-// SD Card chip select pin
+USBHIDKeyboard Keyboard;
+
+// SD card chip select pin (J1 pin 16)
 const int SD_CS_PIN = 10;
 bool sdCardReady = false;
 
-// Display pins
-#define TFT_CS  A0
-#define TFT_DC  A1
-#define TFT_RST A2
+// Display pins (J1 left header)
+#define TFT_CS   9   // J1 pin 15
+#define TFT_DC   8   // J1 pin 12
+#define TFT_RST 14   // J1 pin 20
+
+// SPI pins — must be explicit on ESP32-S3
+// MOSI=11 (J1 pin 17), SCK=12 (J1 pin 18), MISO=13 (J1 pin 19)
+#define SPI_MOSI 11
+#define SPI_SCK  12
+#define SPI_MISO 13
 
 // Colors (RGB565)
 #define BLACK      0x0000
@@ -104,7 +129,7 @@ const PROGMEM uint8_t font5x7[] = {
   0x61,0x51,0x49,0x45,0x43, // Z
 };
 
-// ST7789 command helpers
+// ST7789 command helpers — identical to Pro Micro original
 void tftCmd(uint8_t cmd) {
   SPI.beginTransaction(SPISettings(8000000, MSBFIRST, SPI_MODE0));
   digitalWrite(TFT_DC, LOW);
@@ -127,32 +152,29 @@ void tftInit() {
   pinMode(TFT_CS, OUTPUT);
   pinMode(TFT_DC, OUTPUT);
   pinMode(TFT_RST, OUTPUT);
-  
+
   digitalWrite(TFT_CS, HIGH);  // Deselect display
-  
-  // Initialize SPI
-  SPI.begin();
-  
-  // Hardware reset
+
+  // On ESP32-S3, SPI pins must be specified explicitly.
+  // Using the SPI2 hardware defaults (MOSI=11, SCK=12, MISO=13).
+  SPI.begin(SPI_SCK, SPI_MISO, SPI_MOSI, -1);
+
+  // Hardware reset — same timing as Pro Micro original
   digitalWrite(TFT_RST, HIGH);
   delay(50);
   digitalWrite(TFT_RST, LOW);
   delay(50);
   digitalWrite(TFT_RST, HIGH);
   delay(150);
-  
+
   tftCmd(0x01); delay(150);  // Software reset
   tftCmd(0x11); delay(120);  // Sleep out
-  
-  tftCmd(0x3A); tftData(0x55); // 16-bit color (RGB565)
-  
-  tftCmd(0x36); tftData(0x00); // Memory access: normal orientation
-  
-  tftCmd(0x21); // Display inversion on (needed for many ST7789 displays)
-  
-  tftCmd(0x13); // Normal display mode
-  
-  tftCmd(0x29); delay(50);   // Display on
+
+  tftCmd(0x3A); tftData(0x55);  // 16-bit color (RGB565)
+  tftCmd(0x36); tftData(0x00);  // Memory access: normal orientation
+  tftCmd(0x21);                 // Display inversion on (needed for many ST7789 displays)
+  tftCmd(0x13);                 // Normal display mode
+  tftCmd(0x29); delay(50);      // Display on
 }
 
 void tftSetWindow(uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1) {
@@ -203,7 +225,7 @@ void tftDrawChar(uint16_t x, uint16_t y, char c, uint16_t color) {
 void tftPrint(uint16_t x, uint16_t y, const char* str, uint16_t color) {
   while (*str) {
     char c = *str++;
-    if (c >= 'a' && c <= 'z') c -= 32; // Convert to uppercase
+    if (c >= 'a' && c <= 'z') c -= 32;
     tftDrawChar(x, y, c, color);
     x += 6;
   }
@@ -223,9 +245,11 @@ const int ROWS = 4;
 const int COLS = 4;
 const int NUM_BUTTONS = ROWS * COLS;  // 16 buttons
 
-// Pin assignments
-const int rowPins[ROWS] = {9, 8, 7, 6};
-const int colPins[COLS] = {5, 4, 3, 2};
+// Pin assignments — 8 consecutive physical pins on J1 (left header, pins 4-11)
+// J1 pin:  4      5      6      7
+const int rowPins[ROWS] = {4, 5, 6, 7};
+// J1 pin:  8      9      10     11
+const int colPins[COLS] = {15, 16, 17, 18};
 
 // Debounce settings
 const unsigned long DEBOUNCE_DELAY = 50;
@@ -281,63 +305,22 @@ const char CMD_END = '>';
 String serialBuffer = "";
 bool receiving = false;
 
-// Convert HID key code to Arduino Keyboard library key code
-byte hidToArduinoKey(byte hidCode) {
-  if (hidCode >= 4 && hidCode <= 29) return 'a' + (hidCode - 4);
-  if (hidCode >= 30 && hidCode <= 38) return '1' + (hidCode - 30);
-  if (hidCode == 39) return '0';
-  
-  switch (hidCode) {
-    case 40: return KEY_RETURN;
-    case 41: return KEY_ESC;
-    case 42: return KEY_BACKSPACE;
-    case 43: return KEY_TAB;
-    case 44: return ' ';
-    case 45: return '-';
-    case 46: return '=';
-    case 47: return '[';
-    case 48: return ']';
-    case 49: return '\\';
-    case 51: return ';';
-    case 52: return '\'';
-    case 53: return '`';
-    case 54: return ',';
-    case 55: return '.';
-    case 56: return '/';
-    case 58: return KEY_F1;
-    case 59: return KEY_F2;
-    case 60: return KEY_F3;
-    case 61: return KEY_F4;
-    case 62: return KEY_F5;
-    case 63: return KEY_F6;
-    case 64: return KEY_F7;
-    case 65: return KEY_F8;
-    case 66: return KEY_F9;
-    case 67: return KEY_F10;
-    case 68: return KEY_F11;
-    case 69: return KEY_F12;
-    case 73: return KEY_INSERT;
-    case 74: return KEY_HOME;
-    case 75: return KEY_PAGE_UP;
-    case 76: return KEY_DELETE;
-    case 77: return KEY_END;
-    case 78: return KEY_PAGE_DOWN;
-    case 79: return KEY_RIGHT_ARROW;
-    case 80: return KEY_LEFT_ARROW;
-    case 81: return KEY_DOWN_ARROW;
-    case 82: return KEY_UP_ARROW;
+byte modifierBitToRawHid(byte modBit) {
+  switch (modBit) {
+    case 0x01: return 0xE0;  // Left Ctrl
+    case 0x02: return 0xE1;  // Left Shift
+    case 0x04: return 0xE2;  // Left Alt
+    case 0x08: return 0xE3;  // Left GUI (Cmd/Win)
     default: return 0;
   }
 }
 
-byte modifierBitToKey(byte modBit) {
-  switch (modBit) {
-    case 0x01: return KEY_LEFT_CTRL;
-    case 0x02: return KEY_LEFT_SHIFT;
-    case 0x04: return KEY_LEFT_ALT;
-    case 0x08: return KEY_LEFT_GUI;
-    default: return 0;
+bool waitForUSBMount(unsigned long timeoutMs) {
+  unsigned long start = millis();
+  while (!(bool)USB && (millis() - start < timeoutMs)) {
+    delay(5);
   }
+  return (bool)USB;
 }
 
 void setup() {
@@ -346,12 +329,12 @@ void setup() {
     pinMode(rowPins[r], OUTPUT);
     digitalWrite(rowPins[r], HIGH);
   }
-  
+
   // Initialize column pins as inputs with pull-ups
   for (int c = 0; c < COLS; c++) {
     pinMode(colPins[c], INPUT_PULLUP);
   }
-  
+
   // Initialize button states and names
   for (int i = 0; i < NUM_BUTTONS; i++) {
     lastButtonState[i] = HIGH;
@@ -360,28 +343,48 @@ void setup() {
     buttonHasShortcut[i] = false;
     buttonNames[i][0] = '\0';
   }
-  
+
+  // Serial must be initialized before USB.begin() so that the CDC interface
+  // is registered with TinyUSB before the stack starts. If Serial.begin() is
+  // called after USB.begin(), the host sees only the HID interface (no CDC)
+  // and the device may not enumerate at all.
   Serial.begin(115200);
-  delay(100);
-  
-  // Initialize display first (shares SPI with SD card)
+
+  // Register USB devices then start the TinyUSB stack.
+  // Order: Serial (CDC) first, then Keyboard (HID), then USB.begin().
+  Keyboard.begin();
+  USB.begin();
+
+  // Initialize display immediately so user sees something
   tftInit();
   tftFillRect(0, 0, 240, 320, BLACK);
+  tftPrintF(10, 10, F("CONNECTING..."), WHITE);
+
+  // Wait for USB host to enumerate and enable HID (up to 3 seconds).
+  // SendReport() silently fails if HID isn't ready, so we must wait here.
+  {
+    unsigned long t = millis();
+    while (!(bool)USB && (millis() - t < 3000)) delay(10);
+  }
+
+  // Initialize SD card — must be FAT16 or FAT32 (NOT exFAT)
+  tftFillRect(0, 10, 240, 10, BLACK);
   tftPrintF(10, 10, F("INITIALIZING..."), WHITE);
-  
-  // Initialize SD card (MUST be FAT16 or FAT32, NOT exFAT!)
   sdCardReady = SD.begin(SD_CS_PIN);
-  
-  Keyboard.begin();
-  
+
   if (sdCardReady) {
     scanForShortcuts();
     loadAllNames();
-    Serial.println(F("<READY>"));
-  } else {
-    Serial.println(F("<READY_NOSD>"));
   }
-  
+  // Print USB mode so we can diagnose HID issues.
+  // MODE=0 means TinyUSB/OTG (correct for HID). MODE=1 means HW CDC (no HID).
+  Serial.print(F("<USBMODE:USBMODE="));
+  Serial.print(ARDUINO_USB_MODE);
+  Serial.print(F(",MOUNTED="));
+  Serial.print((bool)USB ? "1" : "0");
+  Serial.println(F(">"));
+  Serial.println(sdCardReady ? F("<READY>") : F("<READY_NOSD>"));
+
   // Draw initial grid
   drawButtonGrid();
 }
@@ -393,24 +396,22 @@ void loop() {
 
 void scanMatrix() {
   for (int r = 0; r < ROWS; r++) {
-    // Set current row LOW
     digitalWrite(rowPins[r], LOW);
     delayMicroseconds(10);
-    
+
     for (int c = 0; c < COLS; c++) {
       int buttonIndex = r * COLS + c;
       int reading = digitalRead(colPins[c]);
-      
+
       if (reading != lastButtonState[buttonIndex]) {
         lastDebounceTime[buttonIndex] = millis();
       }
-      
+
       if ((millis() - lastDebounceTime[buttonIndex]) > DEBOUNCE_DELAY) {
         if (reading != buttonState[buttonIndex]) {
           buttonState[buttonIndex] = reading;
-          
+
           if (buttonState[buttonIndex] == LOW) {
-            // Button pressed
             Serial.print("<PRESSED:");
             Serial.print(buttonIndex);
             Serial.println(">");
@@ -418,11 +419,10 @@ void scanMatrix() {
           }
         }
       }
-      
+
       lastButtonState[buttonIndex] = reading;
     }
-    
-    // Set row back to HIGH
+
     digitalWrite(rowPins[r], HIGH);
   }
 }
@@ -430,7 +430,7 @@ void scanMatrix() {
 void handleSerial() {
   while (Serial.available() > 0) {
     char c = Serial.read();
-    
+
     if (c == CMD_START) {
       receiving = true;
       serialBuffer = "";
@@ -446,41 +446,26 @@ void handleSerial() {
 
 void processCommand(String cmd) {
   if (cmd.startsWith("STEPS:")) {
-    // Format: STEPS:buttonIndex:name:data
     int firstColon = cmd.indexOf(':', 6);
-    if (firstColon == -1) {
-      Serial.println(F("<ERROR:NO_COLON>"));
-      return;
-    }
+    if (firstColon == -1) { Serial.println(F("<ERROR:NO_COLON>")); return; }
     int btnIdx = cmd.substring(6, firstColon).toInt();
     int secondColon = cmd.indexOf(':', firstColon + 1);
-    if (secondColon == -1) {
-      Serial.println(F("<ERROR:NO_SECOND_COLON>"));
-      return;
-    }
-    if (btnIdx < 0 || btnIdx >= NUM_BUTTONS) {
-      Serial.println(F("<ERROR:BAD_BTN>"));
-      return;
-    }
-    
+    if (secondColon == -1) { Serial.println(F("<ERROR:NO_SECOND_COLON>")); return; }
+    if (btnIdx < 0 || btnIdx >= NUM_BUTTONS) { Serial.println(F("<ERROR:BAD_BTN>")); return; }
+
     String name = cmd.substring(firstColon + 1, secondColon);
     String data = cmd.substring(secondColon + 1);
-    
-    // Store the name (truncate if too long)
+
     currentName[0] = '\0';
     int nameLen = min((int)name.length(), MAX_NAME_LENGTH);
-    for (int i = 0; i < nameLen; i++) {
-      currentName[i] = name.charAt(i);
-    }
+    for (int i = 0; i < nameLen; i++) currentName[i] = name.charAt(i);
     currentName[nameLen] = '\0';
-    
+
     parseSteps(btnIdx, data);
     Serial.println(F("<OK>"));
   } else if (cmd.startsWith("GET:")) {
     int btnIdx = cmd.substring(4).toInt();
-    if (btnIdx >= 0 && btnIdx < NUM_BUTTONS) {
-      sendShortcut(btnIdx);
-    }
+    if (btnIdx >= 0 && btnIdx < NUM_BUTTONS) sendShortcut(btnIdx);
   } else if (cmd == "GETALL") {
     sendAllShortcuts();
   } else if (cmd.startsWith("CLEAR:")) {
@@ -490,18 +475,27 @@ void processCommand(String cmd) {
       Serial.println("<CLEARED>");
     }
   } else if (cmd == "CLEARALL") {
-    for (int i = 0; i < NUM_BUTTONS; i++) {
-      clearShortcut(i);
-    }
+    for (int i = 0; i < NUM_BUTTONS; i++) clearShortcut(i);
     Serial.println("<CLEAREDALL>");
   } else if (cmd == "PING") {
     Serial.println("<PONG>");
   } else if (cmd == "SDSTATUS") {
-    if (sdCardReady) {
-      Serial.println("<SD:OK>");
-    } else {
-      Serial.println("<SD:ERROR>");
-    }
+    Serial.println(sdCardReady ? "<SD:OK>" : "<SD:ERROR>");
+    Serial.println((bool)USB ? "<KB:OK>" : "<KB:FAIL>");
+  } else if (cmd == "KBTEST") {
+    // Type "hello" to test if USB HID keyboard is working.
+    // 3-second delay gives user time to click into a text editor.
+    // USBMODE=0 → TinyUSB/OTG (needed for HID). USBMODE=1 → HW CDC (no HID).
+    // If MOUNTED=0, the native USB port may not be connected.
+    Serial.print(F("<KBTEST:USBMODE="));
+    Serial.print(ARDUINO_USB_MODE);
+    Serial.print(F(",MOUNTED="));
+    Serial.print((bool)USB ? "1" : "0");
+    Serial.println(F(">"));
+    delay(3000);
+    Keyboard.print("hello");
+    delay(200);
+    Serial.println(F("<KBTEST:DONE>"));
   } else if (cmd.startsWith("TEST:")) {
     int btnIdx = cmd.substring(5).toInt();
     if (btnIdx >= 0 && btnIdx < NUM_BUTTONS) {
@@ -524,52 +518,38 @@ int b64Index(char c) {
 }
 
 int decodeBase64(const String& input, char* output, int maxLen) {
-  int outLen = 0;
-  int val = 0;
-  int bits = 0;
-  
+  int outLen = 0, val = 0, bits = 0;
   for (unsigned int i = 0; i < input.length() && outLen < maxLen - 1; i++) {
     char c = input[i];
     if (c == '=') break;
-    
     int idx = b64Index(c);
     if (idx < 0) continue;
-    
     val = (val << 6) | idx;
     bits += 6;
-    
     if (bits >= 8) {
       bits -= 8;
       output[outLen++] = (val >> bits) & 0xFF;
     }
   }
-  
   output[outLen] = '\0';
   return outLen;
 }
 
 void parseSteps(int btnIdx, String data) {
-  // Clear current buffer
   currentStepCount = 0;
   currentTextLen = 0;
   currentButtonIdx = btnIdx;
-  
-  int startIdx = 0;
-  int semicolonIdx;
-  
+
+  int startIdx = 0, semicolonIdx;
   while ((semicolonIdx = data.indexOf(';', startIdx)) != -1 && currentStepCount < MAX_STEPS) {
-    String stepStr = data.substring(startIdx, semicolonIdx);
-    parseStep(stepStr);
+    parseStep(data.substring(startIdx, semicolonIdx));
     startIdx = semicolonIdx + 1;
   }
-  
   if (startIdx < (int)data.length() && currentStepCount < MAX_STEPS) {
     String stepStr = data.substring(startIdx);
-    if (stepStr.length() > 0) {
-      parseStep(stepStr);
-    }
+    if (stepStr.length() > 0) parseStep(stepStr);
   }
-  
+
   saveShortcut(btnIdx);
 }
 
@@ -577,17 +557,15 @@ void parseStep(String stepStr) {
   int comma1 = stepStr.indexOf(',');
   int comma2 = stepStr.indexOf(',', comma1 + 1);
   int comma3 = stepStr.indexOf(',', comma2 + 1);
-  
   if (comma1 == -1 || comma2 == -1) return;
-  
+
   byte action = stepStr.substring(0, comma1).toInt();
   int stepIdx = currentStepCount;
-  
+
   if (action == STEP_TYPE && comma3 != -1) {
     String b64text = stepStr.substring(comma3 + 1);
     int textStart = currentTextLen;
     int decoded = decodeBase64(b64text, currentTextBuffer + textStart, MAX_TEXT_LENGTH - textStart);
-    
     if (decoded > 0) {
       currentSteps[stepIdx].action = STEP_TYPE;
       currentSteps[stepIdx].keyType = 0;
@@ -606,8 +584,7 @@ void parseStep(String stepStr) {
 }
 
 void getButtonFilename(int btnIdx, char* filename) {
-  // Use 8.3 filename format: BTN00.DAT to BTN15.DAT
-  sprintf(filename, "BTN%02d.DAT", btnIdx);
+  sprintf(filename, "/BTN%02d.DAT", btnIdx);
 }
 
 void saveShortcut(int btnIdx) {
@@ -615,57 +592,42 @@ void saveShortcut(int btnIdx) {
     Serial.println(F("<DEBUG:Save failed - no SD>"));
     return;
   }
-  
+
   char filename[13];
   getButtonFilename(btnIdx, filename);
-  
-  // Remove existing file
-  if (SD.exists(filename)) {
-    SD.remove(filename);
-  }
-  
-  // Don't create file if no steps
+
+  if (SD.exists(filename)) SD.remove(filename);
+
   if (currentStepCount == 0) {
     buttonHasShortcut[btnIdx] = false;
     buttonNames[btnIdx][0] = '\0';
     updateButtonDisplay(btnIdx);
     return;
   }
-  
+
   File file = SD.open(filename, FILE_WRITE);
-  if (!file) {
-    return;
-  }
-  
-  // Write header: step count and text length
+  if (!file) return;
+
   file.write((byte)currentStepCount);
   file.write((byte)currentTextLen);
-  
-  // Write steps
+
   for (int i = 0; i < currentStepCount; i++) {
     file.write(currentSteps[i].action);
     file.write(currentSteps[i].keyType);
     file.write(currentSteps[i].keyCode);
     file.write(currentSteps[i].textLen);
   }
-  
-  // Write text buffer
-  for (int i = 0; i < currentTextLen; i++) {
-    file.write((byte)currentTextBuffer[i]);
-  }
-  
-  // Write name length and name
+
+  for (int i = 0; i < currentTextLen; i++) file.write((byte)currentTextBuffer[i]);
+
   int nameLen = strlen(currentName);
   file.write((byte)nameLen);
-  for (int i = 0; i < nameLen; i++) {
-    file.write((byte)currentName[i]);
-  }
-  
+  for (int i = 0; i < nameLen; i++) file.write((byte)currentName[i]);
+
   file.flush();
   file.close();
   buttonHasShortcut[btnIdx] = true;
-  
-  // Update button name and display
+
   strncpy(buttonNames[btnIdx], currentName, MAX_NAME_LENGTH);
   buttonNames[btnIdx][MAX_NAME_LENGTH] = '\0';
   updateButtonDisplay(btnIdx);
@@ -676,60 +638,50 @@ bool loadShortcut(int btnIdx) {
   currentStepCount = 0;
   currentTextLen = 0;
   currentName[0] = '\0';
-  
+
   if (!sdCardReady) return false;
-  
+
   char filename[13];
   getButtonFilename(btnIdx, filename);
-  
+
   if (!SD.exists(filename)) return false;
-  
+
   File file = SD.open(filename, FILE_READ);
   if (!file) return false;
-  
-  // Read header
+
   int stepCount = file.read();
   int textLen = file.read();
-  
-  // Validate
+
   if (stepCount < 0 || stepCount > MAX_STEPS || textLen < 0 || textLen > MAX_TEXT_LENGTH) {
     file.close();
     return false;
   }
-  
+
   currentStepCount = stepCount;
   currentTextLen = textLen;
-  
-  // Read steps
+
   for (int i = 0; i < currentStepCount; i++) {
     currentSteps[i].action = file.read();
     currentSteps[i].keyType = file.read();
     currentSteps[i].keyCode = file.read();
     currentSteps[i].textLen = file.read();
   }
-  
-  // Read text buffer
-  for (int i = 0; i < currentTextLen; i++) {
-    currentTextBuffer[i] = file.read();
-  }
-  
-  // Read name
+
+  for (int i = 0; i < currentTextLen; i++) currentTextBuffer[i] = file.read();
+
   currentName[0] = '\0';
   int nameLen = file.read();
   if (nameLen > 0 && nameLen <= MAX_NAME_LENGTH) {
-    for (int i = 0; i < nameLen; i++) {
-      currentName[i] = file.read();
-    }
+    for (int i = 0; i < nameLen; i++) currentName[i] = file.read();
     currentName[nameLen] = '\0';
   }
-  
+
   file.close();
   return currentStepCount > 0;
 }
 
 void scanForShortcuts() {
   if (!sdCardReady) return;
-  
   char filename[13];
   for (int i = 0; i < NUM_BUTTONS; i++) {
     getButtonFilename(i, filename);
@@ -739,64 +691,52 @@ void scanForShortcuts() {
 
 void loadAllNames() {
   if (!sdCardReady) return;
-  
   char filename[13];
   for (int i = 0; i < NUM_BUTTONS; i++) {
     buttonNames[i][0] = '\0';
-    
     if (!buttonHasShortcut[i]) continue;
-    
+
     getButtonFilename(i, filename);
     File file = SD.open(filename, FILE_READ);
     if (!file) continue;
-    
-    // Read step count and text length
+
     int stepCount = file.read();
     int textLen = file.read();
-    
-    // Validate
+
     if (stepCount < 0 || stepCount > MAX_STEPS || textLen < 0 || textLen > MAX_TEXT_LENGTH) {
       file.close();
       continue;
     }
-    
-    // Skip to after steps and text: 2 + stepCount*4 + textLen
+
     long namePos = 2 + (stepCount * 4) + textLen;
     file.seek(namePos);
-    
+
     int nameLen = file.read();
     if (nameLen > 0 && nameLen <= MAX_NAME_LENGTH) {
-      for (int j = 0; j < nameLen; j++) {
-        buttonNames[i][j] = file.read();
-      }
+      for (int j = 0; j < nameLen; j++) buttonNames[i][j] = file.read();
       buttonNames[i][nameLen] = '\0';
     }
-    
+
     file.close();
   }
 }
 
 void drawButtonGrid() {
-  // Dark background
   tftFillRect(0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT, BGDARK);
-  
-  // Header bar with teal color
+
   tftFillRect(0, 0, DISPLAY_WIDTH, 22, TEAL);
-  // "SHORTCUTS" = 9 chars * 6px = 54px, center: (240-54)/2 = 93
   tftPrintF(93, 8, F("SHORTCUTS"), WHITE);
-  
-  // Draw grid with spacing
+
   int margin = 2;
-  int boxW = (DISPLAY_WIDTH - margin * 5) / 4;  // 57px
-  int boxH = (DISPLAY_HEIGHT - 24 - margin * 5) / 4;  // ~72px
-  
+  int boxW = (DISPLAY_WIDTH - margin * 5) / 4;
+  int boxH = (DISPLAY_HEIGHT - 24 - margin * 5) / 4;
+
   for (int row = 0; row < 4; row++) {
     for (int col = 0; col < 4; col++) {
       int btnIdx = row * 4 + col;
       int x = margin + col * (boxW + margin);
       int y = 24 + margin + row * (boxH + margin);
-      
-      // Background fill based on state
+
       if (buttonHasShortcut[btnIdx]) {
         tftFillRect(x, y, boxW, boxH, DARKGRAY);
         tftDrawRect(x, y, boxW, boxH, SOFTCYAN);
@@ -804,40 +744,25 @@ void drawButtonGrid() {
         tftFillRect(x, y, boxW, boxH, BLACK);
         tftDrawRect(x, y, boxW, boxH, DARKGRAY);
       }
-      
-      // Button number in corner with small background
+
       char num[3];
-      if (btnIdx < 9) {
-        num[0] = '0' + btnIdx + 1;
-        num[1] = '\0';
-      } else {
-        num[0] = '1';
-        num[1] = '0' + ((btnIdx + 1) % 10);
-        num[2] = '\0';
-      }
+      if (btnIdx < 9) { num[0] = '0' + btnIdx + 1; num[1] = '\0'; }
+      else { num[0] = '1'; num[1] = '0' + ((btnIdx + 1) % 10); num[2] = '\0'; }
       tftPrint(x + 3, y + 3, num, GRAY);
-      
-      // Name centered (two lines if > 8 chars)
+
       if (buttonNames[btnIdx][0] != '\0') {
         int nameLen = strlen(buttonNames[btnIdx]);
         if (nameLen <= 8) {
-          // Trim trailing spaces for centering
           char trimmed[9];
           strncpy(trimmed, buttonNames[btnIdx], 8);
           trimmed[8] = '\0';
           int len = strlen(trimmed);
           while (len > 0 && trimmed[len-1] == ' ') trimmed[--len] = '\0';
-          int textX = x + (boxW - len * 6) / 2;
-          int textY = y + boxH / 2 - 3;
-          tftPrint(textX, textY, trimmed, WHITE);
+          tftPrint(x + (boxW - len * 6) / 2, y + boxH / 2 - 3, trimmed, WHITE);
         } else {
-          // Two lines - trim each for proper centering
           char line1[9], line2[9];
-          strncpy(line1, buttonNames[btnIdx], 8);
-          line1[8] = '\0';
-          strncpy(line2, buttonNames[btnIdx] + 8, 8);
-          line2[8] = '\0';
-          // Trim trailing spaces
+          strncpy(line1, buttonNames[btnIdx], 8); line1[8] = '\0';
+          strncpy(line2, buttonNames[btnIdx] + 8, 8); line2[8] = '\0';
           int len1 = strlen(line1);
           while (len1 > 0 && line1[len1-1] == ' ') line1[--len1] = '\0';
           int len2 = strlen(line2);
@@ -863,8 +788,7 @@ void updateButtonDisplay(int btnIdx) {
   int col = btnIdx % 4;
   int x = margin + col * (boxW + margin);
   int y = 24 + margin + row * (boxH + margin);
-  
-  // Redraw the entire box
+
   if (buttonHasShortcut[btnIdx]) {
     tftFillRect(x, y, boxW, boxH, DARKGRAY);
     tftDrawRect(x, y, boxW, boxH, SOFTCYAN);
@@ -872,40 +796,25 @@ void updateButtonDisplay(int btnIdx) {
     tftFillRect(x, y, boxW, boxH, BLACK);
     tftDrawRect(x, y, boxW, boxH, DARKGRAY);
   }
-  
-  // Button number
+
   char num[3];
-  if (btnIdx < 9) {
-    num[0] = '0' + btnIdx + 1;
-    num[1] = '\0';
-  } else {
-    num[0] = '1';
-    num[1] = '0' + ((btnIdx + 1) % 10);
-    num[2] = '\0';
-  }
+  if (btnIdx < 9) { num[0] = '0' + btnIdx + 1; num[1] = '\0'; }
+  else { num[0] = '1'; num[1] = '0' + ((btnIdx + 1) % 10); num[2] = '\0'; }
   tftPrint(x + 3, y + 3, num, GRAY);
-  
-  // Name (two lines if > 8 chars)
+
   if (buttonNames[btnIdx][0] != '\0') {
     int nameLen = strlen(buttonNames[btnIdx]);
     if (nameLen <= 8) {
-      // Trim trailing spaces for centering
       char trimmed[9];
       strncpy(trimmed, buttonNames[btnIdx], 8);
       trimmed[8] = '\0';
       int len = strlen(trimmed);
       while (len > 0 && trimmed[len-1] == ' ') trimmed[--len] = '\0';
-      int textX = x + (boxW - len * 6) / 2;
-      int textY = y + boxH / 2 - 3;
-      tftPrint(textX, textY, trimmed, WHITE);
+      tftPrint(x + (boxW - len * 6) / 2, y + boxH / 2 - 3, trimmed, WHITE);
     } else {
-      // Two lines - trim each for proper centering
       char line1[9], line2[9];
-      strncpy(line1, buttonNames[btnIdx], 8);
-      line1[8] = '\0';
-      strncpy(line2, buttonNames[btnIdx] + 8, 8);
-      line2[8] = '\0';
-      // Trim trailing spaces
+      strncpy(line1, buttonNames[btnIdx], 8); line1[8] = '\0';
+      strncpy(line2, buttonNames[btnIdx] + 8, 8); line2[8] = '\0';
       int len1 = strlen(line1);
       while (len1 > 0 && line1[len1-1] == ' ') line1[--len1] = '\0';
       int len2 = strlen(line2);
@@ -925,20 +834,17 @@ void clearShortcut(int btnIdx) {
   if (sdCardReady) {
     char filename[13];
     getButtonFilename(btnIdx, filename);
-    if (SD.exists(filename)) {
-      SD.remove(filename);
-    }
+    if (SD.exists(filename)) SD.remove(filename);
   }
   buttonHasShortcut[btnIdx] = false;
   buttonNames[btnIdx][0] = '\0';
-  
-  // Clear buffer if this was the current button
+
   if (currentButtonIdx == btnIdx) {
     currentStepCount = 0;
     currentTextLen = 0;
     currentName[0] = '\0';
   }
-  
+
   updateButtonDisplay(btnIdx);
 }
 
@@ -949,7 +855,6 @@ void encodeBase64(const char* input, int len, String& output) {
     int b1 = input[i++] & 0xFF;
     int b2 = (i < len) ? (input[i++] & 0xFF) : 0;
     int b3 = (i < len) ? (input[i++] & 0xFF) : 0;
-    
     output += b64chars[(b1 >> 2) & 0x3F];
     output += b64chars[((b1 << 4) | (b2 >> 4)) & 0x3F];
     output += (i > len + 1) ? '=' : b64chars[((b2 << 2) | (b3 >> 6)) & 0x3F];
@@ -958,33 +863,29 @@ void encodeBase64(const char* input, int len, String& output) {
 }
 
 void sendShortcut(int btnIdx) {
-  // Load shortcut from SD into current buffer
   loadShortcut(btnIdx);
-  
+
   Serial.print(F("<STEPS:"));
   Serial.print(btnIdx);
   Serial.print(F(":"));
-  Serial.print(buttonNames[btnIdx]);  // Send name
+  Serial.print(buttonNames[btnIdx]);
   Serial.print(F(":"));
-  
+
   for (int i = 0; i < currentStepCount; i++) {
     Serial.print(currentSteps[i].action);
     Serial.print(F(","));
     Serial.print(currentSteps[i].keyType);
     Serial.print(F(","));
     Serial.print(currentSteps[i].keyCode);
-    
+
     if (currentSteps[i].action == STEP_TYPE) {
       Serial.print(F(","));
       String b64;
-      encodeBase64(currentTextBuffer + currentSteps[i].keyCode, 
-                   currentSteps[i].textLen, b64);
+      encodeBase64(currentTextBuffer + currentSteps[i].keyCode, currentSteps[i].textLen, b64);
       Serial.print(b64);
     }
-    
-    if (i < currentStepCount - 1) {
-      Serial.print(F(";"));
-    }
+
+    if (i < currentStepCount - 1) Serial.print(F(";"));
   }
   Serial.println(F(">"));
 }
@@ -998,46 +899,67 @@ void sendAllShortcuts() {
 }
 
 void executeShortcut(int btnIdx) {
-  // Load shortcut from SD on-demand
   if (!loadShortcut(btnIdx)) {
+    Serial.print(F("<EXEC_FAIL:"));
+    Serial.print(btnIdx);
+    Serial.println(F(":NO_FILE>"));
     return;
   }
-  
+
+  if (!waitForUSBMount(1500)) {
+    Serial.print(F("<EXEC_FAIL:"));
+    Serial.print(btnIdx);
+    Serial.println(F(":USB_NOT_MOUNTED>"));
+    return;
+  }
+
+  Serial.print(F("<EXEC:"));
+  Serial.print(btnIdx);
+  Serial.print(F(":"));
+  Serial.print(currentStepCount);
+  Serial.println(F(">"));
+
   for (int i = 0; i < currentStepCount; i++) {
     byte action = currentSteps[i].action;
     byte keyType = currentSteps[i].keyType;
     byte keyCode = currentSteps[i].keyCode;
-    
+
+    Serial.print(F("<STEP:"));
+    Serial.print(i);
+    Serial.print(F(",a="));
+    Serial.print(action);
+    Serial.print(F(",t="));
+    Serial.print(keyType);
+    Serial.print(F(",k="));
+    Serial.print(keyCode);
+    Serial.println(F(">"));
+
     if (action == STEP_TYPE) {
       int textStart = keyCode;
       int textLen = currentSteps[i].textLen;
-      
       for (int j = 0; j < textLen && (textStart + j) < currentTextLen; j++) {
         Keyboard.write(currentTextBuffer[textStart + j]);
         delay(10);
       }
       delay(20);
     } else if (action == STEP_PRESS || action == STEP_RELEASE) {
-      byte arduinoKey = 0;
-      
+      byte rawHidCode = 0;
       if (keyType == KEY_TYPE_MODIFIER) {
-        arduinoKey = modifierBitToKey(keyCode);
+        // Modifiers are stored as left-side modifier bits.
+        rawHidCode = modifierBitToRawHid(keyCode);
       } else {
-        arduinoKey = hidToArduinoKey(keyCode);
+        // Regular keys are stored as USB HID keycodes from the web UI.
+        rawHidCode = keyCode;
       }
-      
-      if (arduinoKey == 0) continue;
-      
-      if (action == STEP_PRESS) {
-        Keyboard.press(arduinoKey);
-      } else {
-        Keyboard.release(arduinoKey);
+
+      if (rawHidCode) {
+        if (action == STEP_PRESS) Keyboard.pressRaw(rawHidCode);
+        else Keyboard.releaseRaw(rawHidCode);
       }
-      
       delay(20);
     }
   }
-  
+
   delay(50);
   Keyboard.releaseAll();
 }

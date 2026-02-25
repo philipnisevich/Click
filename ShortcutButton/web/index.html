@@ -729,6 +729,7 @@
           <div style="display: flex; gap: 8px;">
             <button id="connect-btn" class="btn btn-primary btn-small">Connect</button>
             <button id="disconnect-btn" class="btn btn-secondary btn-small" disabled>Disconnect</button>
+            <button id="kbtest-btn" class="btn btn-secondary btn-small" disabled title="Open a text editor first, then click. Should type 'hello'.">Test HID</button>
           </div>
         </div>
       </div>
@@ -791,7 +792,7 @@
                 </div>
 
                 <div id="type-input-area" class="type-input-area hidden">
-                  <input type="text" id="type-input" placeholder="Type your text..." />
+                  <input type="text" id="type-input" maxlength="512" placeholder="Type your text..." />
                   <button id="type-done-btn" class="btn btn-success btn-small">Done</button>
                 </div>
               </div>
@@ -843,6 +844,7 @@
     // DOM Elements
     const connectBtn = document.getElementById('connect-btn');
     const disconnectBtn = document.getElementById('disconnect-btn');
+    const kbtestBtn = document.getElementById('kbtest-btn');
     const clearAllBtn = document.getElementById('clear-all-btn');
     const customizeBtn = document.getElementById('customize-btn');
     const customizePanel = document.getElementById('customize-panel');
@@ -1318,6 +1320,43 @@
         log('All shortcuts loaded', 'success');
       } else if (message === 'TESTED') {
         log('Shortcut executed', 'info');
+      } else if (message.startsWith('EXEC:')) {
+        const parts = message.substring(5).split(':');
+        log(`Executing button ${parseInt(parts[0]) + 1} (${parts[1]} steps)`, 'info');
+      } else if (message.startsWith('EXEC_FAIL:')) {
+        const parts = message.substring(10).split(':');
+        log(`Button ${parseInt(parts[0]) + 1} has no shortcut saved`, 'warning');
+      } else if (message.startsWith('STEP:')) {
+        log(`  Step: ${message.substring(5)}`, 'info');
+      } else if (message.startsWith('USBMODE:')) {
+        const parts = Object.fromEntries(message.substring(8).split(',').map(p => p.split('=')));
+        const mode = parts['USBMODE'];
+        const mounted = parts['MOUNTED'];
+        if (mode === '0' && mounted === '1') {
+          log(`USB: TinyUSB/OTG active, device mounted — HID should work`, 'success');
+        } else if (mode === '0' && mounted === '0') {
+          log(`USB: TinyUSB/OTG mode but device NOT mounted — make sure you are plugged into the native USB port (labeled "USB"), not the UART port`, 'warning');
+        } else if (mode === '1') {
+          log(`USB: Compiled in HW CDC mode (USBMODE=1) — HID will NOT work. In Arduino IDE, set USB Mode to "USB-OTG (TinyUSB)" and re-upload`, 'error');
+        } else {
+          log(`USB mode: ${message.substring(8)}`, 'info');
+        }
+      } else if (message.startsWith('KBTEST:')) {
+        const info = message.substring(7);
+        if (info.startsWith('USBMODE=')) {
+          const parts = Object.fromEntries(info.split(',').map(p => p.split('=')));
+          const mode = parts['USBMODE'];
+          const mounted = parts['MOUNTED'];
+          if (mode === '1') {
+            log(`HID test: USBMODE=1 (HW CDC) — HID is NOT available. Re-upload with USB Mode set to "USB-OTG (TinyUSB)" in Arduino IDE`, 'error');
+          } else if (mounted === '0') {
+            log(`HID test: TinyUSB active but device not mounted — ensure you are connected via the native USB port (labeled "USB"), not the UART/programming port`, 'error');
+          } else {
+            log(`HID test: USB OK (USBMODE=${mode}, MOUNTED=${mounted}) — "hello" should appear in 3 seconds`, 'success');
+          }
+        } else if (info === 'DONE') {
+          log('HID test complete — did "hello" appear in your text field?', 'info');
+        }
       } else if (message.startsWith('PRESSED:')) {
         const btnIdx = parseInt(message.substring(8));
         log(`Button ${btnIdx + 1} pressed`, 'success');
@@ -1410,6 +1449,7 @@
       statusText.textContent = connected ? 'Connected' : 'Disconnected';
       connectBtn.disabled = connected;
       disconnectBtn.disabled = !connected;
+      kbtestBtn.disabled = !connected;
       clearAllBtn.disabled = !connected;
       customizeBtn.disabled = !connected || selectedButton === null;
       if (!connected) {
@@ -1715,6 +1755,11 @@
       if (selectedButton !== null) {
         sendCommand(`CLEAR:${selectedButton}`);
       }
+    });
+
+    kbtestBtn.addEventListener('click', () => {
+      log('Testing HID keyboard — you have 3 seconds to click into a text editor!', 'info');
+      sendCommand('KBTEST');
     });
 
     document.querySelectorAll('.quick-btn').forEach(btn => {
