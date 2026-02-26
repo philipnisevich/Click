@@ -8,7 +8,6 @@
   Hardware:
   - ESP32-S3-DevKitC-1 (WROOM-1-N16R8, 16MB flash, 8MB PSRAM)
   - 4x4 Button Matrix (J1 pins 4-11: GPIO4-7 rows, GPIO15-18 cols)
-  - SD Card Module (SPI shared with display: CS=GPIO10, MOSI=11, SCK=12, MISO=13)
   - ST7789 Display (SPI shared: CS=GPIO9, DC=GPIO8, RST=GPIO14)
 
   Arduino IDE board settings:
@@ -16,11 +15,11 @@
   - USB Mode:         USB-OTG (TinyUSB)
   - USB CDC On Boot:  Enabled
   - Flash Size:       16MB (128Mb)
-  - Partition Scheme: Default 4MB with spiffs (or any — SD card is external storage)
+  - Partition Scheme: Default 4MB with spiffs (or any)
 
   First upload: plug into the UART port and upload once.
   Normal use: plug into the native USB port (labeled "USB").
-  The shortcuts are stored on the SD card and persist across power cycles.
+  The shortcuts are stored in ESP32 flash (NVS) and persist across power cycles.
 */
 
 #ifndef ARDUINO_USB_MODE
@@ -32,13 +31,11 @@
 #include "USB.h"
 #include "USBHIDKeyboard.h"
 #include <SPI.h>
-#include <SD.h>
+#include <Preferences.h>
 
 USBHIDKeyboard Keyboard;
-
-// SD card chip select pin (J1 pin 16)
-const int SD_CS_PIN = 10;
-bool sdCardReady = false;
+Preferences prefs;
+bool storageReady = false;
 
 // Display pins (J1 left header)
 #define TFT_CS   9   // J1 pin 15
@@ -262,6 +259,7 @@ const int MAX_TEXT_LENGTH = 20;
 
 // Maximum name length for display
 const int MAX_NAME_LENGTH = 16;
+constexpr size_t SHORTCUT_BLOB_MAX = 2 + (MAX_STEPS * 4) + MAX_TEXT_LENGTH + 1 + MAX_NAME_LENGTH;
 
 // Step types
 const byte STEP_PRESS = 1;
@@ -304,6 +302,112 @@ const char CMD_START = '<';
 const char CMD_END = '>';
 String serialBuffer = "";
 bool receiving = false;
+
+void getStorageKey(int btnIdx, char *keyOut, size_t keyOutLen) {
+  snprintf(keyOut, keyOutLen, "b%02d", btnIdx);
+}
+
+bool serializeCurrentShortcut(uint8_t *outBuf, size_t outBufLen, size_t &outLen) {
+  outLen = 0;
+  if (currentStepCount <= 0) return true;
+  if (currentStepCount > MAX_STEPS || currentTextLen < 0 || currentTextLen > MAX_TEXT_LENGTH) return false;
+  if (outBufLen < SHORTCUT_BLOB_MAX) return false;
+
+  size_t idx = 0;
+  outBuf[idx++] = (uint8_t)currentStepCount;
+  outBuf[idx++] = (uint8_t)currentTextLen;
+
+  for (int i = 0; i < currentStepCount; i++) {
+    outBuf[idx++] = currentSteps[i].action;
+    outBuf[idx++] = currentSteps[i].keyType;
+    outBuf[idx++] = currentSteps[i].keyCode;
+    outBuf[idx++] = currentSteps[i].textLen;
+  }
+
+  for (int i = 0; i < currentTextLen; i++) {
+    outBuf[idx++] = (uint8_t)currentTextBuffer[i];
+  }
+
+  int nameLen = strnlen(currentName, MAX_NAME_LENGTH);
+  outBuf[idx++] = (uint8_t)nameLen;
+  for (int i = 0; i < nameLen; i++) {
+    outBuf[idx++] = (uint8_t)currentName[i];
+  }
+
+  outLen = idx;
+  return true;
+}
+
+bool deserializeShortcutToCurrent(const uint8_t *buf, size_t len) {
+  currentStepCount = 0;
+  currentTextLen = 0;
+  currentName[0] = '\0';
+
+  if (len < 3) return false;
+
+  const int stepCount = buf[0];
+  const int textLen = buf[1];
+  if (stepCount <= 0 || stepCount > MAX_STEPS || textLen < 0 || textLen > MAX_TEXT_LENGTH) return false;
+
+  size_t idx = 2;
+  size_t stepBytes = (size_t)stepCount * 4;
+  if (len < idx + stepBytes + (size_t)textLen + 1) return false;
+
+  currentStepCount = stepCount;
+  currentTextLen = textLen;
+
+  for (int i = 0; i < currentStepCount; i++) {
+    currentSteps[i].action = buf[idx++];
+    currentSteps[i].keyType = buf[idx++];
+    currentSteps[i].keyCode = buf[idx++];
+    currentSteps[i].textLen = buf[idx++];
+  }
+
+  for (int i = 0; i < currentTextLen; i++) {
+    currentTextBuffer[i] = (char)buf[idx++];
+  }
+
+  int nameLen = buf[idx++];
+  if (nameLen < 0 || nameLen > MAX_NAME_LENGTH || len < idx + (size_t)nameLen) return false;
+  for (int i = 0; i < nameLen; i++) {
+    currentName[i] = (char)buf[idx++];
+  }
+  currentName[nameLen] = '\0';
+
+  return true;
+}
+
+bool loadShortcutMetadata(int btnIdx, bool &hasShortcut, char *nameOut, size_t nameOutLen) {
+  hasShortcut = false;
+  if (nameOutLen > 0) nameOut[0] = '\0';
+  if (!storageReady) return false;
+
+  char key[8];
+  getStorageKey(btnIdx, key, sizeof(key));
+  size_t blobLen = prefs.getBytesLength(key);
+  if (blobLen == 0 || blobLen > SHORTCUT_BLOB_MAX) return false;
+
+  uint8_t blob[SHORTCUT_BLOB_MAX];
+  if (prefs.getBytes(key, blob, blobLen) != blobLen) return false;
+
+  int stepCount = blob[0];
+  int textLen = blob[1];
+  if (stepCount <= 0 || stepCount > MAX_STEPS || textLen < 0 || textLen > MAX_TEXT_LENGTH) return false;
+
+  size_t idx = 2 + (size_t)stepCount * 4 + (size_t)textLen;
+  if (idx >= blobLen) return false;
+
+  int nameLen = blob[idx++];
+  if (nameLen < 0 || nameLen > MAX_NAME_LENGTH || idx + (size_t)nameLen > blobLen) return false;
+
+  hasShortcut = true;
+  if (nameOutLen > 0) {
+    size_t copyLen = min((size_t)nameLen, nameOutLen - 1);
+    memcpy(nameOut, blob + idx, copyLen);
+    nameOut[copyLen] = '\0';
+  }
+  return true;
+}
 
 byte modifierBitToRawHid(byte modBit) {
   switch (modBit) {
@@ -367,12 +471,12 @@ void setup() {
     while (!(bool)USB && (millis() - t < 3000)) delay(10);
   }
 
-  // Initialize SD card — must be FAT16 or FAT32 (NOT exFAT)
+  // Initialize on-board storage (NVS flash)
   tftFillRect(0, 10, 240, 10, BLACK);
   tftPrintF(10, 10, F("INITIALIZING..."), WHITE);
-  sdCardReady = SD.begin(SD_CS_PIN);
+  storageReady = prefs.begin("shortcuts", false);
 
-  if (sdCardReady) {
+  if (storageReady) {
     scanForShortcuts();
     loadAllNames();
   }
@@ -383,7 +487,7 @@ void setup() {
   Serial.print(F(",MOUNTED="));
   Serial.print((bool)USB ? "1" : "0");
   Serial.println(F(">"));
-  Serial.println(sdCardReady ? F("<READY>") : F("<READY_NOSD>"));
+  Serial.println(storageReady ? F("<READY>") : F("<READY_NOSD>"));
 
   // Draw initial grid
   drawButtonGrid();
@@ -480,7 +584,7 @@ void processCommand(String cmd) {
   } else if (cmd == "PING") {
     Serial.println("<PONG>");
   } else if (cmd == "SDSTATUS") {
-    Serial.println(sdCardReady ? "<SD:OK>" : "<SD:ERROR>");
+    Serial.println(storageReady ? "<SD:OK>" : "<SD:ERROR>");
     Serial.println((bool)USB ? "<KB:OK>" : "<KB:FAIL>");
   } else if (cmd == "KBTEST") {
     // Type "hello" to test if USB HID keyboard is working.
@@ -583,49 +687,34 @@ void parseStep(String stepStr) {
   }
 }
 
-void getButtonFilename(int btnIdx, char* filename) {
-  sprintf(filename, "/BTN%02d.DAT", btnIdx);
-}
-
 void saveShortcut(int btnIdx) {
-  if (!sdCardReady) {
-    Serial.println(F("<DEBUG:Save failed - no SD>"));
+  if (!storageReady) {
+    Serial.println(F("<DEBUG:Save failed - no storage>"));
     return;
   }
 
-  char filename[13];
-  getButtonFilename(btnIdx, filename);
-
-  if (SD.exists(filename)) SD.remove(filename);
+  char key[8];
+  getStorageKey(btnIdx, key, sizeof(key));
 
   if (currentStepCount == 0) {
+    prefs.remove(key);
     buttonHasShortcut[btnIdx] = false;
     buttonNames[btnIdx][0] = '\0';
     updateButtonDisplay(btnIdx);
     return;
   }
 
-  File file = SD.open(filename, FILE_WRITE);
-  if (!file) return;
-
-  file.write((byte)currentStepCount);
-  file.write((byte)currentTextLen);
-
-  for (int i = 0; i < currentStepCount; i++) {
-    file.write(currentSteps[i].action);
-    file.write(currentSteps[i].keyType);
-    file.write(currentSteps[i].keyCode);
-    file.write(currentSteps[i].textLen);
+  uint8_t blob[SHORTCUT_BLOB_MAX];
+  size_t blobLen = 0;
+  if (!serializeCurrentShortcut(blob, sizeof(blob), blobLen)) {
+    Serial.println(F("<DEBUG:Save failed - serialize error>"));
+    return;
+  }
+  if (prefs.putBytes(key, blob, blobLen) != blobLen) {
+    Serial.println(F("<DEBUG:Save failed - write error>"));
+    return;
   }
 
-  for (int i = 0; i < currentTextLen; i++) file.write((byte)currentTextBuffer[i]);
-
-  int nameLen = strlen(currentName);
-  file.write((byte)nameLen);
-  for (int i = 0; i < nameLen; i++) file.write((byte)currentName[i]);
-
-  file.flush();
-  file.close();
   buttonHasShortcut[btnIdx] = true;
 
   strncpy(buttonNames[btnIdx], currentName, MAX_NAME_LENGTH);
@@ -639,85 +728,38 @@ bool loadShortcut(int btnIdx) {
   currentTextLen = 0;
   currentName[0] = '\0';
 
-  if (!sdCardReady) return false;
+  if (!storageReady) return false;
 
-  char filename[13];
-  getButtonFilename(btnIdx, filename);
+  char key[8];
+  getStorageKey(btnIdx, key, sizeof(key));
+  size_t blobLen = prefs.getBytesLength(key);
+  if (blobLen == 0 || blobLen > SHORTCUT_BLOB_MAX) return false;
 
-  if (!SD.exists(filename)) return false;
+  uint8_t blob[SHORTCUT_BLOB_MAX];
+  if (prefs.getBytes(key, blob, blobLen) != blobLen) return false;
 
-  File file = SD.open(filename, FILE_READ);
-  if (!file) return false;
-
-  int stepCount = file.read();
-  int textLen = file.read();
-
-  if (stepCount < 0 || stepCount > MAX_STEPS || textLen < 0 || textLen > MAX_TEXT_LENGTH) {
-    file.close();
-    return false;
-  }
-
-  currentStepCount = stepCount;
-  currentTextLen = textLen;
-
-  for (int i = 0; i < currentStepCount; i++) {
-    currentSteps[i].action = file.read();
-    currentSteps[i].keyType = file.read();
-    currentSteps[i].keyCode = file.read();
-    currentSteps[i].textLen = file.read();
-  }
-
-  for (int i = 0; i < currentTextLen; i++) currentTextBuffer[i] = file.read();
-
-  currentName[0] = '\0';
-  int nameLen = file.read();
-  if (nameLen > 0 && nameLen <= MAX_NAME_LENGTH) {
-    for (int i = 0; i < nameLen; i++) currentName[i] = file.read();
-    currentName[nameLen] = '\0';
-  }
-
-  file.close();
-  return currentStepCount > 0;
+  return deserializeShortcutToCurrent(blob, blobLen);
 }
 
 void scanForShortcuts() {
-  if (!sdCardReady) return;
-  char filename[13];
+  if (!storageReady) return;
   for (int i = 0; i < NUM_BUTTONS; i++) {
-    getButtonFilename(i, filename);
-    buttonHasShortcut[i] = SD.exists(filename);
+    bool hasShortcut = false;
+    char ignoredName[MAX_NAME_LENGTH + 1];
+    buttonHasShortcut[i] = loadShortcutMetadata(i, hasShortcut, ignoredName, sizeof(ignoredName)) && hasShortcut;
   }
 }
 
 void loadAllNames() {
-  if (!sdCardReady) return;
-  char filename[13];
+  if (!storageReady) return;
   for (int i = 0; i < NUM_BUTTONS; i++) {
     buttonNames[i][0] = '\0';
-    if (!buttonHasShortcut[i]) continue;
-
-    getButtonFilename(i, filename);
-    File file = SD.open(filename, FILE_READ);
-    if (!file) continue;
-
-    int stepCount = file.read();
-    int textLen = file.read();
-
-    if (stepCount < 0 || stepCount > MAX_STEPS || textLen < 0 || textLen > MAX_TEXT_LENGTH) {
-      file.close();
-      continue;
+    bool hasShortcut = false;
+    if (loadShortcutMetadata(i, hasShortcut, buttonNames[i], sizeof(buttonNames[i])) && hasShortcut) {
+      buttonHasShortcut[i] = true;
+    } else {
+      buttonHasShortcut[i] = false;
     }
-
-    long namePos = 2 + (stepCount * 4) + textLen;
-    file.seek(namePos);
-
-    int nameLen = file.read();
-    if (nameLen > 0 && nameLen <= MAX_NAME_LENGTH) {
-      for (int j = 0; j < nameLen; j++) buttonNames[i][j] = file.read();
-      buttonNames[i][nameLen] = '\0';
-    }
-
-    file.close();
   }
 }
 
@@ -831,10 +873,10 @@ void updateButtonDisplay(int btnIdx) {
 }
 
 void clearShortcut(int btnIdx) {
-  if (sdCardReady) {
-    char filename[13];
-    getButtonFilename(btnIdx, filename);
-    if (SD.exists(filename)) SD.remove(filename);
+  if (storageReady) {
+    char key[8];
+    getStorageKey(btnIdx, key, sizeof(key));
+    prefs.remove(key);
   }
   buttonHasShortcut[btnIdx] = false;
   buttonNames[btnIdx][0] = '\0';
