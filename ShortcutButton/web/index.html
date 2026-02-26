@@ -729,7 +729,6 @@
           <div style="display: flex; gap: 8px;">
             <button id="connect-btn" class="btn btn-primary btn-small">Connect</button>
             <button id="disconnect-btn" class="btn btn-secondary btn-small" disabled>Disconnect</button>
-            <button id="kbtest-btn" class="btn btn-secondary btn-small" disabled title="Open a text editor first, then click. Should type 'hello'.">Test HID</button>
           </div>
         </div>
       </div>
@@ -741,7 +740,6 @@
           <div id="button-matrix" class="button-matrix"></div>
           <div class="btn-group" style="justify-content: space-between;">
             <button id="clear-all-btn" class="btn btn-danger btn-small" disabled>Clear All</button>
-            <button id="customize-btn" class="btn btn-blue btn-small" disabled>Customize</button>
           </div>
         </div>
 
@@ -816,9 +814,7 @@
           </div>
 
           <div class="btn-group">
-            <button id="cancel-btn" class="btn btn-secondary" disabled>Cancel</button>
-            <button id="save-btn" class="btn btn-primary" disabled>Save</button>
-            <button id="test-btn" class="btn btn-secondary" disabled>Test</button>
+            <button id="save-btn" class="btn btn-success" disabled>Save</button>
             <button id="clear-btn" class="btn btn-danger" disabled>Clear</button>
           </div>
           </div>
@@ -844,14 +840,10 @@
     // DOM Elements
     const connectBtn = document.getElementById('connect-btn');
     const disconnectBtn = document.getElementById('disconnect-btn');
-    const kbtestBtn = document.getElementById('kbtest-btn');
     const clearAllBtn = document.getElementById('clear-all-btn');
-    const customizeBtn = document.getElementById('customize-btn');
     const customizePanel = document.getElementById('customize-panel');
     const customizePrompt = document.getElementById('customize-prompt');
     const saveBtn = document.getElementById('save-btn');
-    const cancelBtn = document.getElementById('cancel-btn');
-    const testBtn = document.getElementById('test-btn');
     const clearBtn = document.getElementById('clear-btn');
     const statusIndicator = document.getElementById('status');
     const statusText = document.getElementById('status-text');
@@ -876,7 +868,6 @@
     let isConnected = false;
     let readLoopRunning = false;
     let selectedButton = null;
-    let panelButton = null;
     let commandSteps = [];
     let recordingMode = null;
     let buttonShortcuts = new Array(16).fill(null).map(() => []);
@@ -1005,19 +996,24 @@
     }
 
     function selectButton(index) {
-      selectedButton = index;
-      
       // Update visual selection
       document.querySelectorAll('.matrix-btn').forEach((btn, i) => {
         btn.classList.toggle('selected', i === index);
       });
-      
-      // Enable customize button
-      customizeBtn.disabled = !isConnected;
-      
-      // Update prompt to show which button is selected
-      customizePrompt.textContent = `Button ${index + 1} selected - click Customize to edit`;
-      updateCustomizeButtonStyle();
+
+      if (!isConnected) {
+        selectedButton = null;
+        customizePanel.classList.add('hidden');
+        customizePrompt.classList.remove('hidden');
+        customizePrompt.textContent = 'Connect your device first to customize buttons.';
+        selectedBtnText.textContent = 'None';
+        updateButtonState();
+        return;
+      }
+
+      selectedButton = index;
+      // Open the editor immediately for the clicked button.
+      showCustomizePanel();
     }
 
     function showCustomizePanel() {
@@ -1026,7 +1022,6 @@
       // Hide prompt, show panel
       customizePrompt.classList.add('hidden');
       customizePanel.classList.remove('hidden');
-      panelButton = selectedButton;
       
       selectedBtnText.textContent = `Button ${selectedButton + 1}`;
       
@@ -1050,23 +1045,31 @@
       
       stopRecording();
       hideTypeInput();
-      updateCustomizeButtonStyle();
+      updateButtonState();
     }
 
-    function hideCustomizePanel() {
+    function resetToPrompt() {
       customizePanel.classList.add('hidden');
       customizePrompt.classList.remove('hidden');
       customizePrompt.textContent = 'Select a button to customize';
-      panelButton = null;
-      updateCustomizeButtonStyle();
-    }
 
-    function updateCustomizeButtonStyle() {
-      const panelOpen = !customizePanel.classList.contains('hidden');
-      const editingCurrent = panelButton !== null && panelOpen && selectedButton === panelButton;
-      const editingPendingSwitch = panelButton !== null && panelOpen && selectedButton !== null && selectedButton !== panelButton;
-      customizeBtn.classList.toggle('editing-current', editingCurrent);
-      customizeBtn.classList.toggle('editing-pending-switch', editingPendingSwitch);
+      selectedButton = null;
+      selectedBtnText.textContent = 'None';
+      document.querySelectorAll('.matrix-btn').forEach(btn => btn.classList.remove('selected'));
+
+      clearSteps();
+      stopRecording();
+      hideTypeInput();
+
+      document.getElementById('shortcut-name-line1').disabled = true;
+      document.getElementById('shortcut-name-line2').disabled = true;
+      const addLineBtn = document.getElementById('add-line-btn');
+      addLineBtn.disabled = true;
+      addLineBtn.classList.add('inactive');
+      hideSecondLine();
+      updateNameCharCount();
+
+      updateButtonState();
     }
 
     function updateNameCharCount() {
@@ -1191,30 +1194,8 @@
         buttonNames[i] = '';
         updateButtonDisplay(i);
       }
-      
-      // Clear current editing state
-      selectedButton = null;
-      commandSteps = [];
-      renderCommandSteps();
-      updateButtonState();
-      
-      // Reset name inputs
-      document.getElementById('shortcut-name-line1').value = '';
-      document.getElementById('shortcut-name-line1').disabled = true;
-      document.getElementById('shortcut-name-line2').value = '';
-      document.getElementById('shortcut-name-line2').disabled = true;
-      const addLineBtnClean = document.getElementById('add-line-btn');
-      addLineBtnClean.disabled = true;
-      addLineBtnClean.classList.add('inactive');
-      hideSecondLine();
-      updateNameCharCount();
-      
-      selectedBtnText.textContent = 'None';
-      document.querySelectorAll('.matrix-btn').forEach(btn => btn.classList.remove('selected'));
-      
-      // Hide customize panel
-      hideCustomizePanel();
-      customizeBtn.disabled = true;
+
+      resetToPrompt();
     }
 
     async function disconnect() {
@@ -1296,10 +1277,12 @@
       } else if (message === 'OK') {
         log('Saved successfully!', 'success');
         if (selectedButton !== null) {
-          buttonShortcuts[selectedButton] = [...commandSteps];
-          updateButtonDisplay(selectedButton);
-          clearSteps();
+          const savedButton = selectedButton;
+          buttonShortcuts[savedButton] = [...commandSteps];
+          updateButtonDisplay(savedButton);
         }
+        // After save, return to idle prompt until another matrix button is clicked.
+        resetToPrompt();
       } else if (message === 'CLEARED') {
         log('Button cleared', 'warning');
         if (selectedButton !== null) {
@@ -1449,13 +1432,15 @@
       statusText.textContent = connected ? 'Connected' : 'Disconnected';
       connectBtn.disabled = connected;
       disconnectBtn.disabled = !connected;
-      kbtestBtn.disabled = !connected;
       clearAllBtn.disabled = !connected;
-      customizeBtn.disabled = !connected || selectedButton === null;
+
       if (!connected) {
-        panelButton = null;
+        customizePrompt.textContent = 'Select a button to customize';
+      } else if (selectedButton === null && customizePanel.classList.contains('hidden')) {
+        customizePrompt.textContent = 'Select a button to customize';
+        document.querySelectorAll('.matrix-btn').forEach(btn => btn.classList.remove('selected'));
       }
-      updateCustomizeButtonStyle();
+
       updateButtonState();
     }
 
@@ -1465,12 +1450,10 @@
       const validation = validateSteps();
       const hasName = getDisplayName().trim().length > 0;
       
-      pressBtn.disabled = !hasSelection;
-      releaseBtn.disabled = !hasSelection;
-      typeBtn.disabled = !hasSelection;
-      cancelBtn.disabled = !hasSteps;
+      pressBtn.disabled = !isConnected || !hasSelection;
+      releaseBtn.disabled = !isConnected || !hasSelection;
+      typeBtn.disabled = !isConnected || !hasSelection;
       saveBtn.disabled = !isConnected || !hasSelection || !hasSteps || !validation.valid || !hasName;
-      testBtn.disabled = !isConnected || !hasSelection;
       clearBtn.disabled = !isConnected || !hasSelection;
       
       if (hasSteps && !validation.valid) {
@@ -1680,8 +1663,6 @@
       }
     });
     
-    customizeBtn.addEventListener('click', showCustomizePanel);
-
     // Name inputs - filter to only display-compatible characters
     // Display supports: space, A-Z, a-z, 0-9, ! " # $ % & ' ( ) * + , - . / ; = ? @
     // Protocol breaks with: < > :
@@ -1737,29 +1718,12 @@
       e.stopPropagation();
     });
 
-    cancelBtn.addEventListener('click', () => {
-      clearSteps();
-      stopRecording();
-      hideTypeInput();
-    });
-
     saveBtn.addEventListener('click', saveShortcut);
-    
-    testBtn.addEventListener('click', () => {
-      if (selectedButton !== null) {
-        sendCommand(`TEST:${selectedButton}`);
-      }
-    });
 
     clearBtn.addEventListener('click', () => {
       if (selectedButton !== null) {
         sendCommand(`CLEAR:${selectedButton}`);
       }
-    });
-
-    kbtestBtn.addEventListener('click', () => {
-      log('Testing HID keyboard — you have 3 seconds to click into a text editor!', 'info');
-      sendCommand('KBTEST');
     });
 
     document.querySelectorAll('.quick-btn').forEach(btn => {
