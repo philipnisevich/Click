@@ -703,14 +703,6 @@ void setup() {
     loadAllNames();
   }
 
-#if defined(ARDUINO_USB_MODE)
-  Serial.print(F("<USBMODE:USBMODE="));
-  Serial.print(ARDUINO_USB_MODE);
-  Serial.println(F(">"));
-#endif
-  Serial.print(F("<BLE:CONNECTED="));
-  Serial.print(bleConnected ? "1" : "0");
-  Serial.println(F(">"));
   Serial.println(storageReady ? F("<READY>") : F("<READY_NOSD>"));
 
   // Draw initial grid
