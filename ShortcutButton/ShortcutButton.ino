@@ -1,9 +1,9 @@
 /*
   ShortcutButton - ESP32-S3-DevKitC-1 (N16R8)
 
-  A 4x4 button matrix that sends programmable keyboard shortcuts via USB HID.
-  Connect to the web interface via the native USB port to build and map custom
-  shortcuts for each button.
+  A 4x4 button matrix that sends programmable keyboard shortcuts via BLE HID.
+  Use the USB serial connection for the web configurator, and Bluetooth for
+  keyboard shortcut execution.
 
   Hardware:
   - ESP32-S3-DevKitC-1 (WROOM-1-N16R8, 16MB flash, 8MB PSRAM)
@@ -22,20 +22,262 @@
   The shortcuts are stored in ESP32 flash (NVS) and persist across power cycles.
 */
 
-#ifndef ARDUINO_USB_MODE
-#error This ESP32 board has no native USB interface for HID keyboard
-#elif ARDUINO_USB_MODE != 0
-#error Set Tools -> USB Mode -> USB-OTG (TinyUSB)
-#endif
-
-#include "USB.h"
-#include "USBHIDKeyboard.h"
 #include <SPI.h>
 #include <Preferences.h>
+#include <NimBLEDevice.h>
+#include <NimBLEHIDDevice.h>
+#define US_KEYBOARD
+#include "HIDKeyboardTypes.h"
 
-USBHIDKeyboard Keyboard;
+#if defined(ARDUINO_USB_MODE) && (ARDUINO_USB_MODE == 0)
+#include "USB.h"
+#endif
+
 Preferences prefs;
 bool storageReady = false;
+
+const char *BLE_DEVICE_NAME = "ShortcutButton";
+const char *BLE_MANUFACTURER = "Click";
+NimBLEHIDDevice      *bleHid          = nullptr;
+NimBLECharacteristic *bleKeyboardInput  = nullptr;
+NimBLECharacteristic *bleKeyboardOutput = nullptr;
+bool bleConnected  = false;
+bool bleSubscribed = false;
+uint8_t bleKeyReport[8] = {0};
+
+// Standard 8-byte keyboard report (raw bytes):
+// [0]=modifiers, [1]=reserved, [2..7]=up to 6 simultaneous keys.
+const uint8_t bleKeyboardReportMap[] = {
+  0x05, 0x01,        // Usage Page (Generic Desktop)
+  0x09, 0x06,        // Usage (Keyboard)
+  0xA1, 0x01,        // Collection (Application)
+  0x85, 0x01,        //   Report ID (1)
+  0x05, 0x07,        //   Usage Page (Keyboard/Keypad)
+  0x19, 0xE0,        //   Usage Minimum (Keyboard LeftControl)
+  0x29, 0xE7,        //   Usage Maximum (Keyboard Right GUI)
+  0x15, 0x00,        //   Logical Minimum (0)
+  0x25, 0x01,        //   Logical Maximum (1)
+  0x75, 0x01,        //   Report Size (1)
+  0x95, 0x08,        //   Report Count (8)
+  0x81, 0x02,        //   Input (Data,Variable,Absolute)  ; Modifier byte
+  0x95, 0x01,        //   Report Count (1)
+  0x75, 0x08,        //   Report Size (8)
+  0x81, 0x01,        //   Input (Constant)                ; Reserved byte
+  0x95, 0x06,        //   Report Count (6)
+  0x75, 0x08,        //   Report Size (8)
+  0x15, 0x00,        //   Logical Minimum (0)
+  0x25, 0x65,        //   Logical Maximum (101)
+  0x05, 0x07,        //   Usage Page (Keyboard/Keypad)
+  0x19, 0x00,        //   Usage Minimum (Reserved)
+  0x29, 0x65,        //   Usage Maximum (Keyboard Application)
+  0x81, 0x00,        //   Input (Data,Array)               ; Key array (6 keys)
+  0x95, 0x05,        //   Report Count (5)
+  0x75, 0x01,        //   Report Size (1)
+  0x05, 0x08,        //   Usage Page (LEDs)
+  0x19, 0x01,        //   Usage Minimum (Num Lock)
+  0x29, 0x05,        //   Usage Maximum (Kana)
+  0x91, 0x02,        //   Output (Data,Variable,Absolute)  ; LED bits
+  0x95, 0x01,        //   Report Count (1)
+  0x75, 0x03,        //   Report Size (3)
+  0x91, 0x01,        //   Output (Constant)                ; LED padding
+  0xC0               // End Collection
+};
+
+class ShortcutBleInputCallbacks : public NimBLECharacteristicCallbacks {
+  void onSubscribe(NimBLECharacteristic *, NimBLEConnInfo &info, uint16_t subValue) override {
+    bleSubscribed = (subValue != 0);
+    Serial.printf("<BLE:CCCD:%u:sub=%u>\n", info.getConnHandle(), bleSubscribed ? 1 : 0);
+  }
+  void onStatus(NimBLECharacteristic *, NimBLEConnInfo &info, int code) override {
+    Serial.printf("<BLE:NOTIFY_STATUS:%u:code=%d>\n", info.getConnHandle(), code);
+  }
+};
+
+class ShortcutBleOutputCallbacks : public NimBLECharacteristicCallbacks {
+  void onWrite(NimBLECharacteristic *chr, NimBLEConnInfo &) override {
+    const std::string val = chr->getValue();
+    if (!val.empty()) {
+      Serial.printf("<BLE:LED:0x%02X>\n", (uint8_t)val[0]);
+    }
+  }
+};
+
+class ShortcutBleServerCallbacks : public NimBLEServerCallbacks {
+  void onConnect(NimBLEServer *, NimBLEConnInfo &info) override {
+    bleConnected  = true;
+    bleSubscribed = false;
+    Serial.printf("<BLE:CONNECTED:conn=%u:bond=%u>\n",
+      info.getConnHandle(), info.isBonded() ? 1 : 0);
+  }
+  void onDisconnect(NimBLEServer *, NimBLEConnInfo &info, int reason) override {
+    bleConnected  = false;
+    bleSubscribed = false;
+    memset(bleKeyReport, 0, sizeof(bleKeyReport));
+    Serial.printf("<BLE:DISCONNECTED:conn=%u:reason=%d>\n", info.getConnHandle(), reason);
+    NimBLEDevice::startAdvertising();
+  }
+  void onAuthenticationComplete(NimBLEConnInfo &info) override {
+    Serial.printf("<BLE:AUTH_DONE:conn=%u:enc=%u:bond=%u>\n",
+      info.getConnHandle(),
+      info.isEncrypted() ? 1 : 0,
+      info.isBonded() ? 1 : 0);
+  }
+};
+
+void bleSendReport() {
+  if (!bleConnected || !bleSubscribed) return;
+  if (bleKeyboardInput != nullptr) {
+    bleKeyboardInput->setValue(bleKeyReport, sizeof(bleKeyReport));
+    bleKeyboardInput->notify();
+  }
+}
+
+void bleReleaseAll() {
+  bool hadKeys = false;
+  for (size_t i = 0; i < sizeof(bleKeyReport); i++) {
+    if (bleKeyReport[i] != 0) {
+      hadKeys = true;
+      break;
+    }
+  }
+  memset(bleKeyReport, 0, sizeof(bleKeyReport));
+  if (hadKeys) bleSendReport();
+}
+
+bool blePressRaw(uint8_t rawHidCode) {
+  if (!bleConnected || !bleSubscribed || rawHidCode == 0) return false;
+  bool changed = false;
+
+  if (rawHidCode >= 0xE0 && rawHidCode <= 0xE7) {
+    uint8_t bit = 1 << (rawHidCode - 0xE0);
+    if ((bleKeyReport[0] & bit) == 0) {
+      bleKeyReport[0] |= bit;
+      changed = true;
+    }
+  } else {
+    for (int i = 2; i < 8; i++) {
+      if (bleKeyReport[i] == rawHidCode) return false;
+    }
+    for (int i = 2; i < 8; i++) {
+      if (bleKeyReport[i] == 0) {
+        bleKeyReport[i] = rawHidCode;
+        changed = true;
+        break;
+      }
+    }
+  }
+
+  if (changed) bleSendReport();
+  return changed;
+}
+
+bool bleReleaseRaw(uint8_t rawHidCode) {
+  if (!bleConnected || !bleSubscribed || rawHidCode == 0) return false;
+  bool changed = false;
+
+  if (rawHidCode >= 0xE0 && rawHidCode <= 0xE7) {
+    uint8_t bit = 1 << (rawHidCode - 0xE0);
+    if (bleKeyReport[0] & bit) {
+      bleKeyReport[0] &= ~bit;
+      changed = true;
+    }
+  } else {
+    for (int i = 2; i < 8; i++) {
+      if (bleKeyReport[i] == rawHidCode) {
+        bleKeyReport[i] = 0;
+        changed = true;
+      }
+    }
+  }
+
+  if (changed) bleSendReport();
+  return changed;
+}
+
+bool bleTypeChar(char c) {
+  if (!bleConnected || !bleSubscribed) return false;
+
+  const uint8_t idx = static_cast<uint8_t>(c);
+  if (idx >= KEYMAP_SIZE) return false;
+  const KEYMAP &entry = keymap[idx];
+  if (entry.usage == 0) return false;
+
+  uint8_t savedReport[8];
+  memcpy(savedReport, bleKeyReport, sizeof(savedReport));
+
+  bleKeyReport[0] = savedReport[0] | entry.modifier;
+  for (int i = 2; i < 8; i++) bleKeyReport[i] = 0;
+  bleKeyReport[2] = entry.usage;
+
+  bleSendReport();
+  delay(8);
+
+  memcpy(bleKeyReport, savedReport, sizeof(bleKeyReport));
+  bleSendReport();
+  delay(4);
+  return true;
+}
+
+bool waitForBleConnection(unsigned long timeoutMs) {
+  unsigned long start = millis();
+  while (!(bleConnected && bleSubscribed) && (millis() - start < timeoutMs)) {
+    delay(5);
+  }
+  return bleConnected && bleSubscribed;
+}
+
+void configureRandomStaticAddress() {
+  const uint64_t efuse = ESP.getEfuseMac();
+  uint8_t addr[6] = {
+    (uint8_t)(efuse >> 0),  (uint8_t)(efuse >> 8),
+    (uint8_t)(efuse >> 16), (uint8_t)(efuse >> 24),
+    (uint8_t)(efuse >> 32), (uint8_t)(efuse >> 40),
+  };
+  // Top two MSBs must be 1 for static-random address type.
+  addr[5] = (uint8_t)((addr[5] & 0x3F) | 0xC0);
+  NimBLEDevice::setOwnAddrType(BLE_OWN_ADDR_RANDOM);
+  NimBLEDevice::setOwnAddr(addr);
+}
+
+void setupBleKeyboard() {
+  NimBLEDevice::init(BLE_DEVICE_NAME);
+  configureRandomStaticAddress();
+
+  // Just Works bonding — no passkey, no MITM, no Secure Connections.
+  NimBLEDevice::setSecurityAuth(true, false, false);
+  NimBLEDevice::setSecurityIOCap(BLE_HS_IO_NO_INPUT_OUTPUT);
+  NimBLEDevice::setSecurityInitKey(BLE_SM_PAIR_KEY_DIST_ENC | BLE_SM_PAIR_KEY_DIST_ID);
+  NimBLEDevice::setSecurityRespKey(BLE_SM_PAIR_KEY_DIST_ENC | BLE_SM_PAIR_KEY_DIST_ID);
+
+  NimBLEServer *server = NimBLEDevice::createServer();
+  server->setCallbacks(new ShortcutBleServerCallbacks());
+
+  bleHid = new NimBLEHIDDevice(server);
+  bleHid->setReportMap((uint8_t *)bleKeyboardReportMap, (uint16_t)sizeof(bleKeyboardReportMap));
+  bleHid->setManufacturer(BLE_MANUFACTURER);
+  bleHid->setPnp(0x02, 0xe502, 0xa111, 0x0210);
+  bleHid->setHidInfo(0x00, 0x02);
+
+  bleKeyboardInput  = bleHid->getInputReport(REPORT_ID_KEYBOARD);
+  bleKeyboardOutput = bleHid->getOutputReport(REPORT_ID_KEYBOARD);
+  bleKeyboardInput->setCallbacks(new ShortcutBleInputCallbacks());
+  bleKeyboardOutput->setCallbacks(new ShortcutBleOutputCallbacks());
+
+  bleHid->startServices();
+  bleHid->setBatteryLevel(100);
+
+  NimBLEAdvertising *adv = NimBLEDevice::getAdvertising();
+  adv->setAppearance(0x03C1);  // HID Keyboard
+  adv->addServiceUUID(bleHid->getHidService()->getUUID());
+  adv->addServiceUUID(bleHid->getDeviceInfoService()->getUUID());
+  adv->addServiceUUID(bleHid->getBatteryService()->getUUID());
+  adv->setPreferredParams(0x0006, 0x0012);
+  NimBLEDevice::startAdvertising();
+
+  Serial.print(F("<BLE:ADVERTISING:"));
+  Serial.print(BLE_DEVICE_NAME);
+  Serial.println(F(">"));
+}
 
 // Display pins (J1 left header)
 #define TFT_CS   9   // J1 pin 15
@@ -126,7 +368,7 @@ const PROGMEM uint8_t font5x7[] = {
   0x61,0x51,0x49,0x45,0x43, // Z
 };
 
-// ST7789 command helpers — identical to Pro Micro original
+// ST7789 command helpers
 void tftCmd(uint8_t cmd) {
   SPI.beginTransaction(SPISettings(8000000, MSBFIRST, SPI_MODE0));
   digitalWrite(TFT_DC, LOW);
@@ -153,10 +395,9 @@ void tftInit() {
   digitalWrite(TFT_CS, HIGH);  // Deselect display
 
   // On ESP32-S3, SPI pins must be specified explicitly.
-  // Using the SPI2 hardware defaults (MOSI=11, SCK=12, MISO=13).
   SPI.begin(SPI_SCK, SPI_MISO, SPI_MOSI, -1);
 
-  // Hardware reset — same timing as Pro Micro original
+  // Hardware reset
   digitalWrite(TFT_RST, HIGH);
   delay(50);
   digitalWrite(TFT_RST, LOW);
@@ -419,14 +660,6 @@ byte modifierBitToRawHid(byte modBit) {
   }
 }
 
-bool waitForUSBMount(unsigned long timeoutMs) {
-  unsigned long start = millis();
-  while (!(bool)USB && (millis() - start < timeoutMs)) {
-    delay(5);
-  }
-  return (bool)USB;
-}
-
 void setup() {
   // Initialize row pins as outputs (directly driven)
   for (int r = 0; r < ROWS; r++) {
@@ -448,28 +681,17 @@ void setup() {
     buttonNames[i][0] = '\0';
   }
 
-  // Serial must be initialized before USB.begin() so that the CDC interface
-  // is registered with TinyUSB before the stack starts. If Serial.begin() is
-  // called after USB.begin(), the host sees only the HID interface (no CDC)
-  // and the device may not enumerate at all.
   Serial.begin(115200);
-
-  // Register USB devices then start the TinyUSB stack.
-  // Order: Serial (CDC) first, then Keyboard (HID), then USB.begin().
-  Keyboard.begin();
+#if defined(ARDUINO_USB_MODE) && (ARDUINO_USB_MODE == 0)
   USB.begin();
+#endif
 
   // Initialize display immediately so user sees something
   tftInit();
   tftFillRect(0, 0, 240, 320, BLACK);
-  tftPrintF(10, 10, F("CONNECTING..."), WHITE);
+  tftPrintF(10, 10, F("STARTING BLE..."), WHITE);
 
-  // Wait for USB host to enumerate and enable HID (up to 3 seconds).
-  // SendReport() silently fails if HID isn't ready, so we must wait here.
-  {
-    unsigned long t = millis();
-    while (!(bool)USB && (millis() - t < 3000)) delay(10);
-  }
+  setupBleKeyboard();
 
   // Initialize on-board storage (NVS flash)
   tftFillRect(0, 10, 240, 10, BLACK);
@@ -480,12 +702,14 @@ void setup() {
     scanForShortcuts();
     loadAllNames();
   }
-  // Print USB mode so we can diagnose HID issues.
-  // MODE=0 means TinyUSB/OTG (correct for HID). MODE=1 means HW CDC (no HID).
+
+#if defined(ARDUINO_USB_MODE)
   Serial.print(F("<USBMODE:USBMODE="));
   Serial.print(ARDUINO_USB_MODE);
-  Serial.print(F(",MOUNTED="));
-  Serial.print((bool)USB ? "1" : "0");
+  Serial.println(F(">"));
+#endif
+  Serial.print(F("<BLE:CONNECTED="));
+  Serial.print(bleConnected ? "1" : "0");
   Serial.println(F(">"));
   Serial.println(storageReady ? F("<READY>") : F("<READY_NOSD>"));
 
@@ -585,20 +809,22 @@ void processCommand(String cmd) {
     Serial.println("<PONG>");
   } else if (cmd == "SDSTATUS") {
     Serial.println(storageReady ? "<SD:OK>" : "<SD:ERROR>");
-    Serial.println((bool)USB ? "<KB:OK>" : "<KB:FAIL>");
+    Serial.println(bleConnected ? "<KB:OK>" : "<KB:FAIL>");
   } else if (cmd == "KBTEST") {
-    // Type "hello" to test if USB HID keyboard is working.
-    // 3-second delay gives user time to click into a text editor.
-    // USBMODE=0 → TinyUSB/OTG (needed for HID). USBMODE=1 → HW CDC (no HID).
-    // If MOUNTED=0, the native USB port may not be connected.
-    Serial.print(F("<KBTEST:USBMODE="));
-    Serial.print(ARDUINO_USB_MODE);
-    Serial.print(F(",MOUNTED="));
-    Serial.print((bool)USB ? "1" : "0");
+    Serial.print(F("<KBTEST:BLE="));
+    Serial.print(bleConnected ? "1" : "0");
     Serial.println(F(">"));
-    delay(3000);
-    Keyboard.print("hello");
-    delay(200);
+
+    if (!waitForBleConnection(1500)) {
+      Serial.println(F("<KBTEST:NO_BLE>"));
+      return;
+    }
+
+    delay(3000);  // Time to focus a text field on host
+    const char *hello = "hello";
+    for (int i = 0; hello[i] != '\0'; i++) {
+      bleTypeChar(hello[i]);
+    }
     Serial.println(F("<KBTEST:DONE>"));
   } else if (cmd.startsWith("TEST:")) {
     int btnIdx = cmd.substring(5).toInt();
@@ -894,13 +1120,15 @@ void encodeBase64(const char* input, int len, String& output) {
   output = "";
   int i = 0;
   while (i < len) {
-    int b1 = input[i++] & 0xFF;
-    int b2 = (i < len) ? (input[i++] & 0xFF) : 0;
-    int b3 = (i < len) ? (input[i++] & 0xFF) : 0;
+    int remaining = len - i;
+    uint8_t b1 = (uint8_t)input[i++];
+    uint8_t b2 = (remaining > 1) ? (uint8_t)input[i++] : 0;
+    uint8_t b3 = (remaining > 2) ? (uint8_t)input[i++] : 0;
+
     output += b64chars[(b1 >> 2) & 0x3F];
-    output += b64chars[((b1 << 4) | (b2 >> 4)) & 0x3F];
-    output += (i > len + 1) ? '=' : b64chars[((b2 << 2) | (b3 >> 6)) & 0x3F];
-    output += (i > len) ? '=' : b64chars[b3 & 0x3F];
+    output += b64chars[((b1 & 0x03) << 4) | ((b2 >> 4) & 0x0F)];
+    output += (remaining > 1) ? b64chars[((b2 & 0x0F) << 2) | ((b3 >> 6) & 0x03)] : '=';
+    output += (remaining > 2) ? b64chars[b3 & 0x3F] : '=';
   }
 }
 
@@ -935,8 +1163,10 @@ void sendShortcut(int btnIdx) {
 void sendAllShortcuts() {
   for (int i = 0; i < NUM_BUTTONS; i++) {
     sendShortcut(i);
-    delay(10);
+    delay(20);
+    yield();
   }
+  Serial.flush();
   Serial.println("<DONE>");
 }
 
@@ -948,10 +1178,10 @@ void executeShortcut(int btnIdx) {
     return;
   }
 
-  if (!waitForUSBMount(1500)) {
+  if (!waitForBleConnection(1500)) {
     Serial.print(F("<EXEC_FAIL:"));
     Serial.print(btnIdx);
-    Serial.println(F(":USB_NOT_MOUNTED>"));
+    Serial.println(F(":BLE_NOT_CONNECTED>"));
     return;
   }
 
@@ -980,28 +1210,26 @@ void executeShortcut(int btnIdx) {
       int textStart = keyCode;
       int textLen = currentSteps[i].textLen;
       for (int j = 0; j < textLen && (textStart + j) < currentTextLen; j++) {
-        Keyboard.write(currentTextBuffer[textStart + j]);
+        bleTypeChar(currentTextBuffer[textStart + j]);
         delay(10);
       }
       delay(20);
     } else if (action == STEP_PRESS || action == STEP_RELEASE) {
       byte rawHidCode = 0;
       if (keyType == KEY_TYPE_MODIFIER) {
-        // Modifiers are stored as left-side modifier bits.
         rawHidCode = modifierBitToRawHid(keyCode);
       } else {
-        // Regular keys are stored as USB HID keycodes from the web UI.
         rawHidCode = keyCode;
       }
 
       if (rawHidCode) {
-        if (action == STEP_PRESS) Keyboard.pressRaw(rawHidCode);
-        else Keyboard.releaseRaw(rawHidCode);
+        if (action == STEP_PRESS) blePressRaw(rawHidCode);
+        else bleReleaseRaw(rawHidCode);
       }
       delay(20);
     }
   }
 
   delay(50);
-  Keyboard.releaseAll();
+  bleReleaseAll();
 }
