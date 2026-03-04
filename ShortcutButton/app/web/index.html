@@ -1,0 +1,1137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ShortcutButton</title>
+  <style>
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #111;
+      color: #e4e4e7;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      font-size: 13px;
+    }
+
+    /* ── Top bar ── */
+    .topbar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 0 16px;
+      height: 46px;
+      background: #1a1a1a;
+      border-bottom: 1px solid #2a2a2a;
+      flex-shrink: 0;
+    }
+    .brand { font-size: 14px; font-weight: 700; color: #fff; letter-spacing: -.3px; }
+    .topbar-space { flex: 1; }
+
+    .status-badge {
+      display: flex; align-items: center; gap: 6px;
+      padding: 4px 10px; border-radius: 20px;
+      font-size: 11px; font-weight: 600;
+    }
+    .status-badge.disconnected { background: rgba(239,68,68,.12); color: #f87171; }
+    .status-badge.connected    { background: rgba(34,197,94,.12);  color: #4ade80; }
+    .status-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; animation: blink 2s infinite; }
+    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.4} }
+
+    /* ── Buttons ── */
+    .btn {
+      display: inline-flex; align-items: center; gap: 5px;
+      padding: 5px 11px; border: 1px solid transparent; border-radius: 6px;
+      font-size: 12px; font-weight: 600; cursor: pointer; transition: all .15s; white-space: nowrap;
+    }
+    .btn:disabled { opacity: .38; cursor: not-allowed; }
+    .btn-ghost   { background: transparent; color: #a1a1aa; border-color: #333; }
+    .btn-ghost:hover:not(:disabled) { background: #2a2a2a; color: #e4e4e7; }
+    .btn-primary { background: #dc2626; color: #fff; border-color: #dc2626; }
+    .btn-primary:hover:not(:disabled) { background: #b91c1c; }
+    .btn-success { background: #16a34a; color: #fff; border-color: #16a34a; }
+    .btn-success:hover:not(:disabled) { background: #15803d; }
+    .btn-danger  { background: transparent; color: #f87171; border-color: #7f1d1d60; }
+    .btn-danger:hover:not(:disabled) { background: #f871710d; }
+    .btn-record  { background: #dc2626; color: #fff; border-color: transparent; gap: 6px; }
+    .btn-record.recording { background: #7f1d1d; animation: pulse-rec 1.2s infinite; }
+    @keyframes pulse-rec { 0%,100%{box-shadow:0 0 0 0 #dc262640} 50%{box-shadow:0 0 0 7px transparent} }
+
+    /* ── Layout ── */
+    .workspace { display: flex; flex: 1; overflow: hidden; }
+
+    /* ── Sidebar ── */
+    .sidebar {
+      width: 300px; flex-shrink: 0;
+      background: #161616; border-right: 1px solid #252525;
+      display: flex; flex-direction: column; padding: 14px; gap: 10px; overflow-y: auto; overflow-x: hidden;
+    }
+    .sidebar-label {
+      font-size: 10px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 1px; color: #3f3f46;
+    }
+    .key-grid {
+      display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px;
+      aspect-ratio: 1; flex-shrink: 0;
+    }
+    .key-btn {
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      background: #222; border: 1.5px solid #2e2e2e; border-radius: 7px;
+      cursor: pointer; transition: background .14s, border-color .14s; padding: 3px; position: relative;
+      min-width: 0; min-height: 0; overflow: hidden;
+    }
+    .key-btn:hover { background: #2a2a2a; border-color: #3f3f46; }
+    .key-btn.has-macro { border-color: #16a34a50; background: #16a34a0a; }
+    .key-btn.selected { border-color: #dc2626; background: #dc26260f; }
+    .key-btn.pressed  { animation: key-flash .3s ease; }
+    @keyframes key-flash { 50% { background: #16a34a25; } }
+    .key-num  { font-size: 10px; font-weight: 700; color: #52525b; line-height: 1; }
+    .key-btn.has-macro .key-num { color: #4ade80; }
+    .key-btn.selected  .key-num { color: #f87171; }
+    .key-name {
+      font-size: 7px; color: #3f3f46; text-align: center;
+      max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 2px;
+    }
+    .key-btn.has-macro .key-name { color: #4ade80aa; }
+    .sidebar-foot { margin-top: auto; }
+
+
+    /* ── Editor ── */
+    .editor { flex: 1; display: flex; flex-direction: column; overflow: hidden; background: #161616; }
+    .editor-empty {
+      flex: 1; display: flex; align-items: center; justify-content: center;
+      color: #3f3f46; font-size: 14px; flex-direction: column; gap: 8px;
+    }
+    .editor-empty-icon { font-size: 36px; opacity: .25; }
+    .editor-content { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+    .editor-content.hidden { display: none; }
+
+    /* Editor header */
+    .editor-header {
+      display: flex; align-items: center; gap: 14px;
+      padding: 12px 18px; border-bottom: 1px solid #222; flex-shrink: 0; background: #1a1a1a;
+    }
+    .editor-btn-title { font-size: 14px; font-weight: 700; white-space: nowrap; }
+    .name-field { display: flex; flex-direction: column; gap: 4px; }
+    .name-field-label { font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: .8px; color: #3f3f46; }
+    .name-inputs { display: flex; align-items: center; gap: 5px; }
+    .name-input {
+      width: 90px; padding: 4px 7px; background: #222; border: 1px solid #2e2e2e;
+      border-radius: 5px; color: #e4e4e7; font-size: 12px; outline: none; transition: border-color .15s;
+    }
+    .name-input:focus { border-color: #dc2626; }
+    .name-input:disabled { opacity: .35; cursor: not-allowed; }
+    .name-sep { color: #3f3f46; font-size: 13px; }
+    .header-spacer { flex: 1; }
+
+    /* Steps area */
+    .steps-area { flex: 1; overflow-y: auto; padding: 14px 18px; }
+    .steps-list  { display: flex; flex-direction: column; }
+
+    /* Empty state */
+    .steps-empty {
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      gap: 10px; padding: 48px 20px; color: #3f3f46; text-align: center;
+    }
+    .steps-empty-icon { font-size: 30px; opacity: .3; }
+    .steps-empty p { font-size: 12px; line-height: 1.6; max-width: 240px; }
+    .add-first-btn {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 8px 16px; border-radius: 6px;
+      background: #1e1e1e; border: 1px dashed #2e2e2e; color: #52525b;
+      font-size: 12px; cursor: pointer; transition: all .15s;
+    }
+    .add-first-btn:hover { border-color: #dc2626; color: #dc2626; background: #dc26260a; }
+
+    /* Step row */
+    .step-row {
+      display: flex; align-items: center; gap: 8px;
+      padding: 7px 10px; background: #1e1e1e; border: 1px solid #252525;
+      border-radius: 7px; user-select: none; transition: background .1s;
+    }
+    .step-row:hover { background: #222; }
+    .step-num {
+      width: 19px; height: 19px; border-radius: 50%; background: #252525;
+      color: #52525b; font-size: 9px; font-weight: 700;
+      display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+    }
+    .step-badge {
+      display: inline-flex; align-items: center; gap: 3px;
+      padding: 2px 7px; border-radius: 4px; font-size: 10px; font-weight: 700; flex-shrink: 0;
+    }
+    .badge-press   { background: #16a34a18; color: #4ade80; }
+    .badge-release { background: #d9770618; color: #fb923c; }
+    .badge-type    { background: #1d4ed818; color: #60a5fa; }
+    .badge-delay   { background: #92400e18; color: #fbbf24; }
+
+    .step-value {
+      flex: 1; font-size: 12px; font-family: 'SF Mono', 'Fira Code', monospace;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .step-value.key-val  { color: #e4e4e7; font-weight: 600; }
+    .step-value.text-val { color: #93c5fd; }
+    .step-value.time-val { color: #fbbf24; }
+
+    .step-delete {
+      background: none; border: none; color: #3f3f46; cursor: pointer;
+      width: 20px; height: 20px; border-radius: 4px; font-size: 15px; font-weight: 300;
+      display: flex; align-items: center; justify-content: center; flex-shrink: 0; transition: all .1s;
+    }
+    .step-delete:hover { background: #dc262618; color: #f87171; }
+
+    /* Insert-between rows */
+    .insert-row {
+      display: flex; align-items: center; justify-content: center;
+      height: 18px; opacity: 0; transition: opacity .15s; position: relative; cursor: pointer;
+    }
+    .steps-list:hover .insert-row { opacity: .35; }
+    .insert-row:hover { opacity: 1 !important; }
+    .insert-row::before {
+      content: ''; position: absolute; left: 10px; right: 10px; top: 50%;
+      height: 1px; background: #dc262640;
+    }
+    .insert-plus {
+      background: #dc2626; color: #fff; border: none; border-radius: 50%;
+      width: 16px; height: 16px; font-size: 13px; font-weight: 700;
+      display: flex; align-items: center; justify-content: center;
+      cursor: pointer; position: relative; z-index: 1; transition: transform .12s; line-height: 1;
+    }
+    .insert-row:hover .insert-plus { transform: scale(1.25); }
+
+    /* Inline input row (for text/delay entry) */
+    .input-row {
+      display: flex; align-items: center; gap: 7px;
+      padding: 7px 10px; background: #1a1a1a; border: 1px solid #dc262640;
+      border-radius: 7px; margin: 2px 0;
+    }
+    .input-row label { font-size: 11px; color: #71717a; white-space: nowrap; }
+    .input-row input {
+      padding: 4px 8px; background: #222; border: 1px solid #333; border-radius: 5px;
+      color: #e4e4e7; font-size: 12px; outline: none; min-width: 0;
+    }
+    .input-row input:focus { border-color: #dc2626; }
+    .input-row .inp-flex { flex: 1; }
+    .input-row .inp-sm { width: 70px; }
+    .input-row .btn { padding: 3px 9px; font-size: 11px; }
+
+    /* Editor toolbar */
+    .editor-toolbar {
+      display: flex; align-items: center; gap: 8px;
+      padding: 10px 18px; border-top: 1px solid #222; flex-shrink: 0; background: #111;
+    }
+    .toolbar-space { flex: 1; }
+    .add-step-btn {
+      display: inline-flex; align-items: center; gap: 5px;
+      padding: 5px 11px; border-radius: 6px; background: #1e1e1e;
+      border: 1px dashed #333; color: #71717a; font-size: 12px; font-weight: 600;
+      cursor: pointer; transition: all .15s;
+    }
+    .add-step-btn:hover { border-color: #dc2626; color: #dc2626; background: #dc26260a; }
+
+    /* ── Step popover ── */
+    .step-popover {
+      position: fixed; z-index: 1000; background: #1e1e1e; border: 1px solid #2e2e2e;
+      border-radius: 8px; padding: 5px; box-shadow: 0 10px 30px rgba(0,0,0,.6);
+      min-width: 155px;
+    }
+    .step-popover.hidden { display: none; }
+    .popover-item {
+      display: flex; align-items: center; gap: 8px;
+      padding: 7px 9px; border-radius: 5px; cursor: pointer;
+      font-size: 12px; color: #a1a1aa; transition: all .1s; white-space: nowrap;
+    }
+    .popover-item:hover { background: #252525; color: #e4e4e7; }
+    .pop-icon { width: 16px; text-align: center; }
+    .pop-divider { height: 1px; background: #252525; margin: 4px 5px; }
+
+    /* ── Key capture modal ── */
+    .modal-overlay {
+      position: fixed; inset: 0; z-index: 1500; background: rgba(0,0,0,.65);
+      display: flex; align-items: center; justify-content: center; backdrop-filter: blur(3px);
+    }
+    .modal-overlay.hidden { display: none; }
+    .modal-box {
+      background: #1e1e1e; border: 1px solid #2e2e2e; border-radius: 12px;
+      padding: 28px 34px; text-align: center; min-width: 260px;
+    }
+    .modal-box h3 { font-size: 15px; margin-bottom: 6px; }
+    .modal-box p  { font-size: 11px; color: #71717a; margin-bottom: 18px; line-height: 1.5; }
+    .key-display  { font-size: 30px; font-weight: 700; color: #dc2626; min-height: 44px; margin-bottom: 14px; font-family: monospace; }
+
+    /* ── Recording overlay ── */
+    .record-overlay {
+      position: fixed; inset: 0; z-index: 1400; background: rgba(0,0,0,.7);
+      display: flex; align-items: center; justify-content: center; backdrop-filter: blur(4px);
+    }
+    .record-overlay.hidden { display: none; }
+    .record-box {
+      background: #1e1e1e; border: 1px solid #2e2e2e; border-radius: 12px;
+      padding: 28px 36px; text-align: center; width: 340px;
+    }
+    .record-pulse {
+      width: 44px; height: 44px; border-radius: 50%; background: #dc2626;
+      margin: 0 auto 14px; animation: rec-pulse 1s infinite;
+    }
+    @keyframes rec-pulse { 0%,100%{box-shadow:0 0 0 0 #dc262650} 50%{box-shadow:0 0 0 12px transparent} }
+    .record-box h3 { font-size: 15px; margin-bottom: 6px; }
+    .record-box p  { font-size: 11px; color: #71717a; margin-bottom: 14px; line-height: 1.5; }
+    .record-preview {
+      background: #151515; border-radius: 6px; padding: 8px 10px;
+      max-height: 130px; overflow-y: auto; margin-bottom: 16px;
+      text-align: left; min-height: 38px;
+    }
+    .rec-step { font-size: 11px; color: #52525b; padding: 2px 0; font-family: monospace; }
+    .rec-step.fresh { color: #4ade80; animation: fade-slide .2s ease; }
+    @keyframes fade-slide { from { opacity:0; transform:translateX(-5px); } }
+    .rec-empty { font-size: 11px; color: #3f3f46; text-align: center; padding: 6px 0; }
+
+    /* ── Log ── */
+    .log-panel {
+      border-top: 1px solid #1e1e1e; flex-shrink: 0; display: flex;
+      flex-direction: column; background: #0e0e0e; max-height: 110px;
+    }
+    .log-header {
+      display: flex; align-items: center; padding: 5px 14px;
+      font-size: 9px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 1.2px; color: #3f3f46; cursor: default;
+      border-bottom: 1px solid #1a1a1a; flex-shrink: 0;
+    }
+    .log-body {
+      flex: 1; overflow-y: auto; padding: 4px 14px;
+      font-family: 'SF Mono', 'Fira Code', monospace; font-size: 10px;
+    }
+    .log-entry { padding: 1.5px 0; color: #3f3f46; }
+    .log-entry.info    { color: #3b82f6; }
+    .log-entry.success { color: #22c55e; }
+    .log-entry.error   { color: #ef4444; }
+    .log-entry.warning { color: #f59e0b; }
+
+    ::-webkit-scrollbar { width: 4px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #2e2e2e; border-radius: 2px; }
+
+    .not-supported { text-align: center; padding: 60px; color: #f87171; font-size: 14px; }
+  </style>
+</head>
+<body>
+  <div id="not-supported" class="not-supported" style="display:none">
+    Web Serial API not supported. Use Chrome, Edge, or the ShortcutButton app.
+  </div>
+
+  <div id="main-app" style="display:flex;flex-direction:column;height:100vh">
+    <!-- Top bar -->
+    <header class="topbar">
+      <div class="brand">ShortcutButton</div>
+      <div class="topbar-space"></div>
+      <div id="status-badge" class="status-badge disconnected">
+        <span class="status-dot"></span>
+        <span id="status-text">Disconnected</span>
+      </div>
+      <button id="connect-btn" class="btn btn-ghost">Connect</button>
+      <button id="disconnect-btn" class="btn btn-ghost" disabled>Disconnect</button>
+    </header>
+
+    <div class="workspace">
+      <!-- Sidebar -->
+      <aside class="sidebar">
+        <div class="sidebar-label">Buttons</div>
+        <div id="key-grid" class="key-grid"></div>
+
+
+        <div class="sidebar-foot">
+          <button id="clear-all-btn" class="btn btn-danger" style="width:100%" disabled>Clear All</button>
+        </div>
+      </aside>
+
+      <!-- Editor -->
+      <main class="editor">
+        <div id="editor-empty" class="editor-empty">
+          <div class="editor-empty-icon">⌨</div>
+          <div>Select a button to edit its macro</div>
+        </div>
+
+        <div id="editor-content" class="editor-content hidden">
+          <!-- Header -->
+          <div class="editor-header">
+            <div id="editor-btn-title" class="editor-btn-title">Button 1</div>
+            <div class="name-field">
+              <div class="name-field-label">Display Name</div>
+              <div class="name-inputs">
+                <input id="name-line1" class="name-input" maxlength="8" placeholder="Line 1" disabled />
+                <span id="name-sep" class="name-sep" style="display:none">·</span>
+                <input id="name-line2" class="name-input" maxlength="8" placeholder="Line 2" disabled style="display:none" />
+              </div>
+            </div>
+            <button id="add-name-line-btn" class="btn btn-ghost" disabled style="font-size:11px;padding:4px 9px">+ Line 2</button>
+            <div class="header-spacer"></div>
+          </div>
+
+          <!-- Steps -->
+          <div class="steps-area">
+            <div id="steps-list" class="steps-list"></div>
+          </div>
+
+          <!-- Toolbar -->
+          <div class="editor-toolbar">
+            <button id="record-btn" class="btn btn-record" disabled>⏺ Record</button>
+            <div class="add-step-btn" id="add-step-main-btn">+ Add Step</div>
+            <div class="toolbar-space"></div>
+            <span id="save-warning" style="color:#f87171;font-size:11px;font-weight:600;"></span>
+            <button id="save-btn" class="btn btn-success" disabled>Save</button>
+            <button id="clear-btn" class="btn btn-danger" disabled>Clear</button>
+          </div>
+        </div>
+      </main>
+    </div>
+
+    <!-- Log -->
+    <div class="log-panel">
+      <div class="log-header">Activity Log</div>
+      <div id="log-body" class="log-body"></div>
+    </div>
+  </div>
+
+  <!-- Step type popover -->
+  <div id="step-popover" class="step-popover hidden">
+    <div class="popover-item" data-type="press">  <span class="pop-icon">↓</span> Press Key</div>
+    <div class="popover-item" data-type="release"><span class="pop-icon">↑</span> Release Key</div>
+    <div class="pop-divider"></div>
+    <div class="popover-item" data-type="type">   <span class="pop-icon">⌨</span> Type Text</div>
+    <div class="pop-divider"></div>
+    <div class="popover-item" data-type="delay">  <span class="pop-icon">⏱</span> Fixed Delay</div>
+  </div>
+
+  <!-- Key capture modal -->
+  <div id="key-capture-overlay" class="modal-overlay hidden">
+    <div class="modal-box">
+      <h3 id="key-capture-title">Press a key</h3>
+      <p>Press the physical key you want to add as this step.</p>
+      <div id="key-display" class="key-display">—</div>
+      <button id="key-capture-cancel" class="btn btn-ghost">Cancel</button>
+    </div>
+  </div>
+
+  <!-- Recording overlay -->
+  <div id="record-overlay" class="record-overlay hidden">
+    <div class="record-box">
+      <div class="record-pulse"></div>
+      <h3>Recording</h3>
+      <p>Press and release keys. Each press and release is captured as a separate step. Click Stop when finished.</p>
+      <div id="record-preview" class="record-preview">
+        <div class="rec-empty">Waiting for keys…</div>
+      </div>
+      <button id="stop-record-btn" class="btn btn-primary" style="width:100%">Stop Recording</button>
+    </div>
+  </div>
+
+  <script>
+    // ── State ──
+    let port = null, reader = null, writer = null;
+    let isConnected = false, readLoopRunning = false;
+    let selectedButton = null;
+    let commandSteps = [];
+    let buttonShortcuts = Array.from({length:16}, () => []);
+    let buttonNames = Array(16).fill('');
+    let readableStreamClosed, writableStreamClosed;
+
+
+    // Key capture state
+    let keyCaptureCallback = null;
+
+    // Recording state
+    let isRecording = false;
+    let recordedSteps = [];
+    let recordingPressed = new Set(); // tracks keys pressed during recording (for macOS Cmd+key fix)
+
+    // Popover state
+    let popoverInsertAt = null; // null = append at end
+
+    // ── Constants ──
+    const STEP_PRESS = 1, STEP_RELEASE = 2, STEP_TYPE = 3, STEP_DELAY = 4;
+    const KEY_TYPE_REGULAR = 0, KEY_TYPE_MODIFIER = 128;
+
+    // ── Key map ──
+    const keyMap = {
+      cmd:{hid:0x08,display:'⌘ Cmd',isModifier:true},
+      ctrl:{hid:0x01,display:'Ctrl',isModifier:true},
+      shift:{hid:0x02,display:'Shift',isModifier:true},
+      alt:{hid:0x04,display:'Alt',isModifier:true},
+      a:{hid:4,display:'A'},b:{hid:5,display:'B'},c:{hid:6,display:'C'},
+      d:{hid:7,display:'D'},e:{hid:8,display:'E'},f:{hid:9,display:'F'},
+      g:{hid:10,display:'G'},h:{hid:11,display:'H'},i:{hid:12,display:'I'},
+      j:{hid:13,display:'J'},k:{hid:14,display:'K'},l:{hid:15,display:'L'},
+      m:{hid:16,display:'M'},n:{hid:17,display:'N'},o:{hid:18,display:'O'},
+      p:{hid:19,display:'P'},q:{hid:20,display:'Q'},r:{hid:21,display:'R'},
+      s:{hid:22,display:'S'},t:{hid:23,display:'T'},u:{hid:24,display:'U'},
+      v:{hid:25,display:'V'},w:{hid:26,display:'W'},x:{hid:27,display:'X'},
+      y:{hid:28,display:'Y'},z:{hid:29,display:'Z'},
+      '1':{hid:30,display:'1'},'2':{hid:31,display:'2'},'3':{hid:32,display:'3'},
+      '4':{hid:33,display:'4'},'5':{hid:34,display:'5'},'6':{hid:35,display:'6'},
+      '7':{hid:36,display:'7'},'8':{hid:37,display:'8'},'9':{hid:38,display:'9'},
+      '0':{hid:39,display:'0'},
+      enter:{hid:40,display:'Enter'},esc:{hid:41,display:'Esc'},
+      backspace:{hid:42,display:'Bksp'},tab:{hid:43,display:'Tab'},
+      space:{hid:44,display:'Space'},minus:{hid:45,display:'-'},
+      equals:{hid:46,display:'='},lbracket:{hid:47,display:'['},
+      rbracket:{hid:48,display:']'},backslash:{hid:49,display:'\\'},
+      semicolon:{hid:51,display:';'},quote:{hid:52,display:"'"},
+      grave:{hid:53,display:'`'},comma:{hid:54,display:','},
+      period:{hid:55,display:'.'},slash:{hid:56,display:'/'},
+      f1:{hid:58,display:'F1'},f2:{hid:59,display:'F2'},f3:{hid:60,display:'F3'},
+      f4:{hid:61,display:'F4'},f5:{hid:62,display:'F5'},f6:{hid:63,display:'F6'},
+      f7:{hid:64,display:'F7'},f8:{hid:65,display:'F8'},f9:{hid:66,display:'F9'},
+      f10:{hid:67,display:'F10'},f11:{hid:68,display:'F11'},f12:{hid:69,display:'F12'},
+      right:{hid:79,display:'→'},left:{hid:80,display:'←'},
+      down:{hid:81,display:'↓'},up:{hid:82,display:'↑'},
+      home:{hid:74,display:'Home'},end:{hid:77,display:'End'},
+      pageup:{hid:75,display:'PgUp'},pagedown:{hid:78,display:'PgDn'},
+      delete:{hid:76,display:'Del'},
+    };
+    const keyCodeMap = {
+      91:'cmd',93:'cmd',224:'cmd',17:'ctrl',16:'shift',18:'alt',
+      65:'a',66:'b',67:'c',68:'d',69:'e',70:'f',71:'g',72:'h',73:'i',
+      74:'j',75:'k',76:'l',77:'m',78:'n',79:'o',80:'p',81:'q',82:'r',
+      83:'s',84:'t',85:'u',86:'v',87:'w',88:'x',89:'y',90:'z',
+      48:'0',49:'1',50:'2',51:'3',52:'4',53:'5',54:'6',55:'7',56:'8',57:'9',
+      112:'f1',113:'f2',114:'f3',115:'f4',116:'f5',117:'f6',
+      118:'f7',119:'f8',120:'f9',121:'f10',122:'f11',123:'f12',
+      13:'enter',27:'esc',8:'backspace',9:'tab',32:'space',
+      189:'minus',173:'minus',187:'equals',61:'equals',
+      219:'lbracket',221:'rbracket',220:'backslash',
+      186:'semicolon',59:'semicolon',222:'quote',192:'grave',
+      188:'comma',190:'period',191:'slash',
+      37:'left',38:'up',39:'right',40:'down',
+      36:'home',35:'end',33:'pageup',34:'pagedown',46:'delete',
+    };
+
+    // ── Init ──
+    if (!('serial' in navigator)) {
+      document.getElementById('not-supported').style.display = 'block';
+      document.getElementById('main-app').style.display = 'none';
+    }
+    initKeyGrid();
+
+    // ── Key grid ──
+    function initKeyGrid() {
+      const grid = document.getElementById('key-grid');
+      grid.innerHTML = '';
+      for (let i = 0; i < 16; i++) {
+        const b = document.createElement('div');
+        b.className = 'key-btn';
+        b.dataset.index = i;
+        b.innerHTML = `<span class="key-num">${i+1}</span><span class="key-name">Empty</span>`;
+        b.addEventListener('click', () => selectButton(i));
+        grid.appendChild(b);
+      }
+    }
+
+    function updateKeyBtn(index) {
+      const b = document.getElementById('key-grid').children[index];
+      const hasMacro = buttonShortcuts[index]?.length > 0;
+      const name = buttonNames[index]?.trim();
+      b.classList.toggle('has-macro', hasMacro);
+      b.classList.toggle('selected', index === selectedButton);
+      b.querySelector('.key-name').textContent = name || (hasMacro ? '✓' : 'Empty');
+    }
+
+    function flashKeyBtn(index) {
+      const b = document.getElementById('key-grid').children[index];
+      b.classList.add('pressed');
+      setTimeout(() => b.classList.remove('pressed'), 300);
+    }
+
+    // ── Select button ──
+    function selectButton(index) {
+      if (!isConnected) return;
+      selectedButton = index;
+      document.querySelectorAll('.key-btn').forEach((b,i) => b.classList.toggle('selected', i===index));
+      document.getElementById('editor-empty').style.display = 'none';
+      document.getElementById('editor-content').classList.remove('hidden');
+      document.getElementById('editor-btn-title').textContent = `Button ${index+1}`;
+      commandSteps = [...(buttonShortcuts[index] || [])];
+      renderSteps();
+      setDisplayName(buttonNames[index] || '');
+      document.getElementById('name-line1').disabled = false;
+      document.getElementById('add-name-line-btn').disabled = false;
+      updateToolbar();
+    }
+
+    // ── Name helpers ──
+    function getDisplayName() {
+      const l1 = document.getElementById('name-line1').value.trim();
+      const l2 = document.getElementById('name-line2').value.trim();
+      if (l2) return l1.substring(0,8).padEnd(8,' ') + l2.substring(0,8);
+      return l1.substring(0,8);
+    }
+
+    function setDisplayName(name) {
+      const l1El = document.getElementById('name-line1');
+      const l2El = document.getElementById('name-line2');
+      const sep  = document.getElementById('name-sep');
+      const addBtn = document.getElementById('add-name-line-btn');
+      if (name.length > 8) {
+        l1El.value = name.substring(0,8).trim();
+        l2El.value = name.substring(8,16).trim();
+        l2El.disabled = false; l2El.style.display = 'block'; sep.style.display = '';
+        addBtn.style.display = 'none';
+      } else {
+        l1El.value = name.trim();
+        l2El.value = ''; l2El.disabled = true; l2El.style.display = 'none'; sep.style.display = 'none';
+        addBtn.style.display = '';
+      }
+    }
+
+    document.getElementById('add-name-line-btn').addEventListener('click', () => {
+      const l2El = document.getElementById('name-line2');
+      const sep  = document.getElementById('name-sep');
+      l2El.disabled = false; l2El.style.display = 'block'; sep.style.display = '';
+      l2El.focus();
+      document.getElementById('add-name-line-btn').style.display = 'none';
+    });
+
+    const nameFilter = /[^A-Za-z0-9 !"#$%&'()*+,\-.\/;=?@]/g;
+    ['name-line1','name-line2'].forEach(id => {
+      document.getElementById(id).addEventListener('input', function() {
+        this.value = this.value.replace(nameFilter, '');
+        updateToolbar();
+      });
+    });
+
+    // ── Step rendering ──
+    function renderSteps() {
+      const list = document.getElementById('steps-list');
+      list.innerHTML = '';
+
+      if (commandSteps.length === 0) {
+        list.innerHTML = `
+          <div class="steps-empty">
+            <div class="steps-empty-icon">⌨</div>
+            <p>No steps yet. Click <strong>+ Add Step</strong> below or use <strong>⏺ Record</strong> to capture keystrokes.</p>
+            <div class="add-first-btn" id="add-first-btn">+ Add First Step</div>
+          </div>`;
+        document.getElementById('add-first-btn').addEventListener('click', e => {
+          e.stopPropagation();
+          showPopover(e.currentTarget, null);
+        });
+        return;
+      }
+
+      list.appendChild(makeInsertRow(0));
+      commandSteps.forEach((step, i) => {
+        list.appendChild(makeStepRow(step, i));
+        list.appendChild(makeInsertRow(i + 1));
+      });
+    }
+
+    function makeStepRow(step, index) {
+      const row = document.createElement('div');
+      row.className = 'step-row';
+
+      const num = document.createElement('div');
+      num.className = 'step-num';
+      num.textContent = index + 1;
+
+      const badge = document.createElement('span');
+      badge.className = 'step-badge';
+
+      const val = document.createElement('span');
+      val.className = 'step-value';
+
+      if (step.action === 'press') {
+        badge.className += ' badge-press'; badge.textContent = '↓ Press';
+        val.className += ' key-val'; val.textContent = keyMap[step.key]?.display || step.key;
+      } else if (step.action === 'release') {
+        badge.className += ' badge-release'; badge.textContent = '↑ Release';
+        val.className += ' key-val'; val.textContent = keyMap[step.key]?.display || step.key;
+      } else if (step.action === 'type') {
+        badge.className += ' badge-type'; badge.textContent = '⌨ Type';
+        val.className += ' text-val'; val.textContent = `"${step.text}"`;
+      } else if (step.action === 'delay') {
+        badge.className += ' badge-delay'; badge.textContent = '⏱ Delay';
+        val.className += ' time-val'; val.textContent = `${step.ms} ms`;
+      }
+
+      const del = document.createElement('button');
+      del.className = 'step-delete';
+      del.textContent = '×';
+      del.title = 'Remove step';
+      del.addEventListener('click', () => { commandSteps.splice(index, 1); renderSteps(); updateToolbar(); });
+
+      row.append(num, badge, val, del);
+      return row;
+    }
+
+    function makeInsertRow(insertAt) {
+      const wrap = document.createElement('div');
+      wrap.className = 'insert-row';
+      const plus = document.createElement('button');
+      plus.className = 'insert-plus';
+      plus.textContent = '+';
+      plus.title = 'Insert step here';
+      plus.addEventListener('click', e => { e.stopPropagation(); showPopover(plus, insertAt); });
+      wrap.appendChild(plus);
+      return wrap;
+    }
+
+    // ── Popover ──
+    function showPopover(anchor, insertAt) {
+      popoverInsertAt = insertAt; // null = append
+      const pop = document.getElementById('step-popover');
+      pop.classList.remove('hidden');
+      const r = anchor.getBoundingClientRect();
+      let left = r.left, top = r.bottom + 6;
+      if (left + 170 > window.innerWidth) left = window.innerWidth - 175;
+      if (top + 220 > window.innerHeight) top = r.top - 226;
+      pop.style.left = left + 'px';
+      pop.style.top  = top  + 'px';
+    }
+
+    function hidePopover() { document.getElementById('step-popover').classList.add('hidden'); }
+
+    document.getElementById('step-popover').querySelectorAll('.popover-item').forEach(item => {
+      item.addEventListener('click', () => {
+        const type = item.dataset.type;
+        const at = popoverInsertAt !== null ? popoverInsertAt : commandSteps.length;
+        hidePopover();
+        handleAddStep(type, at);
+      });
+    });
+
+    document.addEventListener('click', e => {
+      if (!e.target.closest('#step-popover') && !e.target.closest('.insert-plus') &&
+          !e.target.closest('.add-first-btn') && !e.target.closest('#add-step-main-btn')) {
+        hidePopover();
+      }
+    });
+
+    document.getElementById('add-step-main-btn').addEventListener('click', e => {
+      e.stopPropagation();
+      showPopover(e.currentTarget, null);
+    });
+
+    // ── Add step handlers ──
+    function handleAddStep(type, insertAt) {
+      if (type === 'press' || type === 'release') { captureKey(type, insertAt); return; }
+      if (type === 'type')  { showInlineInput('type',  insertAt); return; }
+      if (type === 'delay') { showInlineInput('delay', insertAt); return; }
+    }
+
+    // ── Key capture ──
+    function captureKey(action, insertAt) {
+      const overlay = document.getElementById('key-capture-overlay');
+      document.getElementById('key-capture-title').textContent =
+        action === 'press' ? '↓ Press Down — press a key' : '↑ Release — press a key';
+      document.getElementById('key-display').textContent = '—';
+      overlay.classList.remove('hidden');
+      keyCaptureCallback = keyName => {
+        overlay.classList.add('hidden');
+        keyCaptureCallback = null;
+        const at = insertAt !== null ? insertAt : commandSteps.length;
+        commandSteps.splice(at, 0, { action, key: keyName });
+        renderSteps(); updateToolbar();
+      };
+    }
+
+    document.getElementById('key-capture-cancel').addEventListener('click', () => {
+      document.getElementById('key-capture-overlay').classList.add('hidden');
+      keyCaptureCallback = null;
+    });
+
+    // ── Inline input rows ──
+    function showInlineInput(type, insertAt) {
+      // Remove any existing input row first
+      document.querySelector('.input-row')?.remove();
+      const row = document.createElement('div');
+      row.className = 'input-row';
+
+      if (type === 'type') {
+        row.innerHTML = `
+          <label>Text:</label>
+          <input class="inp-flex" type="text" maxlength="512" placeholder="Type your text…" />
+          <button class="btn btn-success" id="inp-confirm">Add</button>
+          <button class="btn btn-ghost"   id="inp-cancel">✕</button>`;
+        appendInputRow(row, insertAt);
+        const inp = row.querySelector('input');
+        inp.focus();
+        row.querySelector('#inp-confirm').addEventListener('click', () => {
+          const text = inp.value;
+          if (!text.trim()) { row.remove(); return; }
+          doInsert({ action:'type', text }, insertAt); row.remove();
+        });
+        inp.addEventListener('keydown', e => {
+          if (e.key === 'Enter') { e.preventDefault(); row.querySelector('#inp-confirm').click(); }
+          if (e.key === 'Escape') row.remove();
+          e.stopPropagation();
+        });
+
+      } else if (type === 'delay') {
+        row.innerHTML = `
+          <label>⏱ Fixed Delay:</label>
+          <input class="inp-sm" type="number" min="10" max="60000" step="10" value="100" />
+          <label>ms</label>
+          <button class="btn btn-success" id="inp-confirm">Add</button>
+          <button class="btn btn-ghost"   id="inp-cancel">✕</button>`;
+        appendInputRow(row, insertAt);
+        const inp = row.querySelector('input');
+        inp.focus(); inp.select();
+        row.querySelector('#inp-confirm').addEventListener('click', () => {
+          const ms = Math.max(10, Math.min(60000, parseInt(inp.value)||100));
+          doInsert({ action:'delay', ms }, insertAt); row.remove();
+        });
+        inp.addEventListener('keydown', e => {
+          if (e.key === 'Enter') row.querySelector('#inp-confirm').click();
+          if (e.key === 'Escape') row.remove();
+          e.stopPropagation();
+        });
+
+      }
+
+      row.querySelector('#inp-cancel').addEventListener('click', () => row.remove());
+    }
+
+    function appendInputRow(row, insertAt) {
+      const list = document.getElementById('steps-list');
+      // Find the correct insert-row element and place the input after it
+      const insertRows = list.querySelectorAll('.insert-row');
+      if (insertAt !== null && insertRows[insertAt]) {
+        insertRows[insertAt].after(row);
+      } else {
+        list.appendChild(row);
+      }
+    }
+
+    function doInsert(step, insertAt) {
+      const at = insertAt !== null ? insertAt : commandSteps.length;
+      commandSteps.splice(at, 0, step);
+      renderSteps(); updateToolbar();
+    }
+
+    // ── Recording ──
+    document.getElementById('record-btn').addEventListener('click', () => {
+      if (isRecording) stopRecording(); else startRecording();
+    });
+    document.getElementById('stop-record-btn').addEventListener('click', stopRecording);
+
+    function startRecording() {
+      isRecording = true; recordedSteps = []; recordingPressed.clear();
+      document.getElementById('record-btn').classList.add('recording');
+      document.getElementById('record-btn').textContent = '⏹ Stop';
+      document.getElementById('record-overlay').classList.remove('hidden');
+      document.getElementById('record-preview').innerHTML = '<div class="rec-empty">Waiting for keys…</div>';
+    }
+
+    function stopRecording() {
+      isRecording = false;
+      document.getElementById('record-btn').classList.remove('recording');
+      document.getElementById('record-btn').textContent = '⏺ Record';
+      document.getElementById('record-overlay').classList.add('hidden');
+      if (recordedSteps.length > 0) {
+        commandSteps.push(...recordedSteps);
+        renderSteps(); updateToolbar();
+      }
+      recordedSteps = [];
+    }
+
+    function addRecordStep(step) {
+      recordedSteps.push(step);
+      const preview = document.getElementById('record-preview');
+      if (recordedSteps.length === 1) preview.innerHTML = '';
+      const entry = document.createElement('div');
+      entry.className = 'rec-step fresh';
+      const k = keyMap[step.key]?.display || step.key;
+      entry.textContent = step.action === 'press' ? `↓  ${k}` : `↑  ${k}`;
+      preview.appendChild(entry);
+      preview.scrollTop = preview.scrollHeight;
+    }
+
+    // ── Keyboard events ──
+    document.addEventListener('keydown', e => {
+      if (keyCaptureCallback) {
+        e.preventDefault(); e.stopPropagation();
+        const keyName = keyCodeMap[e.keyCode];
+        if (keyName) {
+          document.getElementById('key-display').textContent = keyMap[keyName]?.display || keyName;
+          const cb = keyCaptureCallback;
+          keyCaptureCallback = null;
+          setTimeout(() => cb(keyName), 120);
+        }
+        return;
+      }
+      if (isRecording) {
+        e.preventDefault(); e.stopPropagation();
+        if (!e.repeat) {
+          const keyName = keyCodeMap[e.keyCode];
+          if (keyName) {
+            recordingPressed.add(keyName);
+            addRecordStep({ action:'press', key:keyName });
+            // macOS suppresses keyup for non-modifier keys while Cmd is held.
+            // Auto-insert the release immediately so it's not missing.
+            if (!keyMap[keyName]?.isModifier && e.metaKey) {
+              addRecordStep({ action:'release', key:keyName });
+              recordingPressed.delete(keyName);
+            }
+          }
+        }
+        return;
+      }
+    }, true);
+
+    document.addEventListener('keyup', e => {
+      if (isRecording) {
+        e.preventDefault(); e.stopPropagation();
+        const keyName = keyCodeMap[e.keyCode];
+        if (keyName) {
+          // macOS suppresses keyup for non-modifier keys held during Cmd.
+          // When a modifier is released, auto-insert releases for any non-modifier
+          // keys still in the pressed set (they never got their keyup event).
+          if (keyMap[keyName]?.isModifier) {
+            for (const held of [...recordingPressed]) {
+              if (!keyMap[held]?.isModifier) {
+                addRecordStep({ action:'release', key:held });
+                recordingPressed.delete(held);
+              }
+            }
+          }
+          recordingPressed.delete(keyName);
+          addRecordStep({ action:'release', key:keyName });
+        }
+        return;
+      }
+    }, true);
+
+    // ── Toolbar state ──
+    function getUnreleasedKeys() {
+      const pressed = new Set();
+      for (const step of commandSteps) {
+        if (step.action === 'press')   pressed.add(step.key);
+        if (step.action === 'release') pressed.delete(step.key);
+      }
+      return pressed;
+    }
+
+    function updateToolbar() {
+      const ok = isConnected && selectedButton !== null;
+      const hasSteps = commandSteps.length > 0;
+      const hasName  = getDisplayName().trim().length > 0;
+      const warn     = document.getElementById('save-warning');
+      document.getElementById('record-btn').disabled = !ok;
+      document.getElementById('clear-btn').disabled  = !ok;
+      if (!ok || !hasSteps || !hasName) {
+        document.getElementById('save-btn').disabled = true;
+        warn.textContent = '';
+      } else {
+        const unreleased = getUnreleasedKeys();
+        if (unreleased.size > 0) {
+          document.getElementById('save-btn').disabled = true;
+          const names = [...unreleased].map(k => keyMap[k]?.display || k).join(', ');
+          warn.textContent = `⚠ Unreleased: ${names}`;
+        } else {
+          document.getElementById('save-btn').disabled = false;
+          warn.textContent = '';
+        }
+      }
+    }
+
+    // ── Serial connection ──
+    async function connect() {
+      try {
+        port = await navigator.serial.requestPort();
+        await port.open({ baudRate: 115200 });
+        port.addEventListener('disconnect', handleDisconnect);
+
+        const td = new TextDecoderStream();
+        readableStreamClosed = port.readable.pipeTo(td.writable);
+        reader = td.readable.getReader();
+
+        const te = new TextEncoderStream();
+        writableStreamClosed = te.readable.pipeTo(port.writable);
+        writer = te.writable.getWriter();
+
+        isConnected = true;
+        updateConnectionUI(true);
+        log('Connected', 'success');
+        readLoop();
+        setTimeout(() => sendCommand('GETALL'), 500);
+      } catch (err) {
+        log(`Connection failed: ${err.message}`, 'error');
+      }
+    }
+
+    async function disconnect() {
+      try {
+        readLoopRunning = false;
+        if (reader) { await reader.cancel(); await readableStreamClosed.catch(()=>{}); reader = null; }
+        if (writer) { await writer.close(); await writableStreamClosed.catch(()=>{}); writer = null; }
+        if (port)   { port.removeEventListener('disconnect', handleDisconnect); await port.close(); port = null; }
+      } catch(e) {}
+      cleanup();
+    }
+
+    function handleDisconnect() { log('Device disconnected', 'warning'); cleanup(); }
+
+    function cleanup() {
+      readLoopRunning = false; reader = null; writer = null; port = null; isConnected = false;
+      for (let i=0;i<16;i++) { buttonShortcuts[i]=[]; buttonNames[i]=''; updateKeyBtn(i); }
+      selectedButton = null; commandSteps = [];
+      document.getElementById('editor-empty').style.display = '';
+      document.getElementById('editor-content').classList.add('hidden');
+      updateConnectionUI(false);
+    }
+
+    function updateConnectionUI(connected) {
+      const badge = document.getElementById('status-badge');
+      badge.className = `status-badge ${connected ? 'connected' : 'disconnected'}`;
+      document.getElementById('status-text').textContent = connected ? 'Connected' : 'Disconnected';
+      document.getElementById('connect-btn').disabled    = connected;
+      document.getElementById('disconnect-btn').disabled = !connected;
+      document.getElementById('clear-all-btn').disabled  = !connected;
+      updateToolbar();
+    }
+
+    async function sendCommand(cmd) {
+      if (!writer) return;
+      try { await writer.write(`<${cmd}>`); }
+      catch(e) { log(`Send error: ${e.message}`, 'error'); }
+    }
+
+    async function readLoop() {
+      readLoopRunning = true;
+      let buf = '';
+      while (readLoopRunning && reader) {
+        try {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buf += value;
+          let s, e;
+          while ((s=buf.indexOf('<'))!==-1 && (e=buf.indexOf('>',s))!==-1) {
+            processMessage(buf.substring(s+1,e));
+            buf = buf.substring(e+1);
+          }
+        } catch(err) {
+          if (readLoopRunning) { log('Connection lost','error'); cleanup(); }
+          break;
+        }
+      }
+    }
+
+    // ── Message processing ──
+    function processMessage(msg) {
+      if (msg==='READY')      { log('Device ready','success'); }
+      else if (msg==='READY_NOSD') { log('Device ready','success'); }
+      else if (msg==='OK')    {
+        log('Saved','success');
+        if (selectedButton !== null) {
+          buttonShortcuts[selectedButton] = [...commandSteps];
+          buttonNames[selectedButton] = getDisplayName();
+          updateKeyBtn(selectedButton);
+        }
+      }
+      else if (msg==='CLEARED') {
+        log('Cleared','warning');
+        if (selectedButton !== null) {
+          buttonShortcuts[selectedButton]=[]; buttonNames[selectedButton]='';
+          commandSteps=[]; renderSteps(); updateKeyBtn(selectedButton); updateToolbar();
+        }
+      }
+      else if (msg==='CLEAREDALL') {
+        log('All cleared','warning');
+        for(let i=0;i<16;i++){buttonShortcuts[i]=[];buttonNames[i]='';updateKeyBtn(i);}
+        commandSteps=[]; renderSteps(); updateToolbar();
+      }
+      else if (msg==='DONE')   { log('All shortcuts loaded','success'); }
+      else if (msg.startsWith('STEPS:'))   { parseShortcutResponse(msg.substring(6)); }
+      else if (msg.startsWith('PRESSED:')) {
+        const idx = parseInt(msg.substring(8));
+        log(`Button ${idx+1} pressed`, 'info'); flashKeyBtn(idx);
+      }
+      else if (msg === 'BONDS_CLEARED'){ log('Pairing data cleared — re-pair the device', 'warning'); }
+      else if (msg.startsWith('BLE:'))   { log('[BLE] '+msg.substring(4),'info'); }
+      else if (msg.startsWith('DEBUG:')) { log('[DBG] '+msg.substring(6),'warning'); }
+      else if (msg.startsWith('ERROR:')) { log('[ERR] '+msg.substring(6),'error'); }
+      else if (msg==='PONG')             { log('Device responding','success'); }
+    }
+
+    function parseShortcutResponse(data) {
+      const c1 = data.indexOf(':'); if (c1===-1) return;
+      const btnIdx = parseInt(data.substring(0,c1));
+      if (btnIdx<0||btnIdx>=16) return;
+      const c2 = data.indexOf(':',c1+1);
+      const name      = c2!==-1 ? data.substring(c1+1,c2) : '';
+      const stepsData = c2!==-1 ? data.substring(c2+1) : '';
+      buttonNames[btnIdx] = name;
+      const steps = [];
+      if (stepsData) {
+        for (const part of stepsData.split(';')) {
+          if (!part) continue;
+          const cols   = part.split(',');
+          const action = parseInt(cols[0]);
+          if (action===STEP_TYPE && cols.length>3) {
+            try { steps.push({action:'type', text:atob(cols[3])}); } catch(e){}
+          } else if (action===STEP_DELAY && cols.length>=3) {
+            const ms = (parseInt(cols[1])<<8) | parseInt(cols[2]);
+            steps.push({action:'delay', ms});
+          } else if (cols.length>=3) {
+            const keyType=parseInt(cols[1]), keyCode=parseInt(cols[2]);
+            for (const [name,info] of Object.entries(keyMap)) {
+              if (info.isModifier && keyType===KEY_TYPE_MODIFIER && info.hid===keyCode) {
+                steps.push({action:action===STEP_PRESS?'press':'release', key:name}); break;
+              } else if (!info.isModifier && keyType===KEY_TYPE_REGULAR && info.hid===keyCode) {
+                steps.push({action:action===STEP_PRESS?'press':'release', key:name}); break;
+              }
+            }
+          }
+        }
+      }
+      buttonShortcuts[btnIdx] = steps;
+      updateKeyBtn(btnIdx);
+      if (btnIdx===selectedButton) { commandSteps=[...steps]; renderSteps(); }
+    }
+
+    // ── Save ──
+    async function saveShortcut() {
+      if (selectedButton===null) return;
+      const name = getDisplayName();
+      const parts = commandSteps.map(step => {
+        if (step.action==='type')
+          return `${STEP_TYPE},0,0,${btoa(step.text)}`;
+        if (step.action==='delay') {
+          const hi=(step.ms>>8)&0xFF, lo=step.ms&0xFF;
+          return `${STEP_DELAY},${hi},${lo}`;
+        }
+        const info   = keyMap[step.key];
+        const action = step.action==='press' ? STEP_PRESS : STEP_RELEASE;
+        const ktype  = info.isModifier ? KEY_TYPE_MODIFIER : KEY_TYPE_REGULAR;
+        return `${action},${ktype},${info.hid}`;
+      });
+      await sendCommand(`STEPS:${selectedButton}:${name}:${parts.join(';')}`);
+      log(`Saving "${name||'unnamed'}" → Button ${selectedButton+1}…`, 'info');
+    }
+
+    // ── Log ──
+    function log(msg, type='info') {
+      const body  = document.getElementById('log-body');
+      const entry = document.createElement('div');
+      entry.className = `log-entry ${type}`;
+      entry.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+      body.appendChild(entry);
+      body.scrollTop = body.scrollHeight;
+    }
+
+    // ── Event bindings ──
+    document.getElementById('connect-btn').addEventListener('click', connect);
+    document.getElementById('disconnect-btn').addEventListener('click', disconnect);
+    document.getElementById('save-btn').addEventListener('click', saveShortcut);
+    document.getElementById('clear-btn').addEventListener('click', () => {
+      if (selectedButton!==null) sendCommand(`CLEAR:${selectedButton}`);
+    });
+    document.getElementById('clear-all-btn').addEventListener('click', () => {
+      if (confirm('Clear ALL button shortcuts?')) sendCommand('CLEARALL');
+    });
+
+  </script>
+</body>
+</html>

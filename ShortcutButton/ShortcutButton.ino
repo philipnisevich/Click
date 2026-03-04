@@ -36,13 +36,14 @@
 Preferences prefs;
 bool storageReady = false;
 
-const char *BLE_DEVICE_NAME = "ShortcutButton";
+char bleName[64] = "ShortcutButton";  // loaded from NVS before BLE init
 const char *BLE_MANUFACTURER = "Click";
 NimBLEHIDDevice      *bleHid          = nullptr;
 NimBLECharacteristic *bleKeyboardInput  = nullptr;
 NimBLECharacteristic *bleKeyboardOutput = nullptr;
 bool bleConnected  = false;
 bool bleSubscribed = false;
+volatile bool bleDisplayNeedsUpdate = false;
 uint8_t bleKeyReport[8] = {0};
 
 // Standard 8-byte keyboard report (raw bytes):
@@ -106,12 +107,14 @@ class ShortcutBleServerCallbacks : public NimBLEServerCallbacks {
   void onConnect(NimBLEServer *, NimBLEConnInfo &info) override {
     bleConnected  = true;
     bleSubscribed = false;
+    bleDisplayNeedsUpdate = true;
     Serial.printf("<BLE:CONNECTED:conn=%u:bond=%u>\n",
       info.getConnHandle(), info.isBonded() ? 1 : 0);
   }
   void onDisconnect(NimBLEServer *, NimBLEConnInfo &info, int reason) override {
     bleConnected  = false;
     bleSubscribed = false;
+    bleDisplayNeedsUpdate = true;
     memset(bleKeyReport, 0, sizeof(bleKeyReport));
     Serial.printf("<BLE:DISCONNECTED:conn=%u:reason=%d>\n", info.getConnHandle(), reason);
     NimBLEDevice::startAdvertising();
@@ -240,7 +243,7 @@ void configureRandomStaticAddress() {
 }
 
 void setupBleKeyboard() {
-  NimBLEDevice::init(BLE_DEVICE_NAME);
+  NimBLEDevice::init(bleName);
   configureRandomStaticAddress();
 
   // Just Works bonding — no passkey, no MITM, no Secure Connections.
@@ -267,6 +270,8 @@ void setupBleKeyboard() {
   bleHid->setBatteryLevel(100);
 
   NimBLEAdvertising *adv = NimBLEDevice::getAdvertising();
+  adv->setMinInterval(32);   // 20 ms — fast advertising so host reconnects quickly
+  adv->setMaxInterval(64);   // 40 ms
   adv->setAppearance(0x03C1);  // HID Keyboard
   adv->addServiceUUID(bleHid->getHidService()->getUUID());
   adv->addServiceUUID(bleHid->getDeviceInfoService()->getUUID());
@@ -275,7 +280,7 @@ void setupBleKeyboard() {
   NimBLEDevice::startAdvertising();
 
   Serial.print(F("<BLE:ADVERTISING:"));
-  Serial.print(BLE_DEVICE_NAME);
+  Serial.print(bleName);
   Serial.println(F(">"));
 }
 
@@ -296,6 +301,7 @@ void setupBleKeyboard() {
 #define GRAY       0x7BEF
 #define DARKGRAY   0x2104
 #define LIGHTGRAY  0xC618
+#define GREEN      0x07E0
 #define CYAN       0x07FF
 #define SOFTCYAN   0x2D7F
 #define TEAL       0x0410
@@ -506,6 +512,11 @@ constexpr size_t SHORTCUT_BLOB_MAX = 2 + (MAX_STEPS * 4) + MAX_TEXT_LENGTH + 1 +
 const byte STEP_PRESS = 1;
 const byte STEP_RELEASE = 2;
 const byte STEP_TYPE = 3;
+// STEP_DELAY: fixed delay. delay_ms = (keyType << 8) | keyCode  (0–65535 ms)
+const byte STEP_DELAY = 4;
+// STEP_DELAY_DYNAMIC: random delay each execution.
+//   min_ms = keyType * 20,  max_ms = keyCode * 20  (0–5100 ms each, 20 ms resolution)
+const byte STEP_DELAY_DYNAMIC = 5;
 
 // Key types
 const byte KEY_TYPE_REGULAR = 0x00;
@@ -661,6 +672,13 @@ byte modifierBitToRawHid(byte modBit) {
 }
 
 void setup() {
+  // On a cold power-on (ESP_RST_POWERON) the USB boot sequence interferes
+  // with BLE initialisation. A single automatic soft-reset makes every cold
+  // boot behave exactly like pressing the reset button — no delays, no checks.
+  if (esp_reset_reason() == ESP_RST_POWERON) {
+    ESP.restart();
+  }
+
   // Initialize row pins as outputs (directly driven)
   for (int r = 0; r < ROWS; r++) {
     pinMode(rowPins[r], OUTPUT);
@@ -681,17 +699,28 @@ void setup() {
     buttonNames[i][0] = '\0';
   }
 
-  Serial.begin(115200);
-#if defined(ARDUINO_USB_MODE) && (ARDUINO_USB_MODE == 0)
-  USB.begin();
-#endif
-
-  // Initialize display immediately so user sees something
+  // Initialize display first — SPI only, no conflict with BLE or USB.
   tftInit();
   tftFillRect(0, 0, 240, 320, BLACK);
   tftPrintF(10, 10, F("STARTING BLE..."), WHITE);
 
+  // Load BLE device name from NVS before BLE init so the right name advertises.
+  {
+    Preferences devicePrefs;
+    if (devicePrefs.begin("device", true)) {
+      devicePrefs.getString("name", bleName, sizeof(bleName));
+      devicePrefs.end();
+    }
+  }
+
+  // Start BLE before USB to avoid any radio interference during USB enumeration.
   setupBleKeyboard();
+
+  // USB / Serial
+  Serial.begin(115200);
+#if defined(ARDUINO_USB_MODE) && (ARDUINO_USB_MODE == 0)
+  USB.begin();
+#endif
 
   // Initialize on-board storage (NVS flash)
   tftFillRect(0, 10, 240, 10, BLACK);
@@ -712,6 +741,20 @@ void setup() {
 void loop() {
   handleSerial();
   scanMatrix();
+
+  // Update BLE status in the display header whenever connection state changes.
+  if (bleDisplayNeedsUpdate) {
+    updateBleStatusDisplay();
+  }
+
+  // If BLE advertising stopped for any reason, restart it every 5 seconds until connected.
+  static unsigned long lastAdvCheck = 0;
+  if (!bleConnected && millis() - lastAdvCheck > 5000) {
+    lastAdvCheck = millis();
+    if (!NimBLEDevice::getAdvertising()->isAdvertising()) {
+      NimBLEDevice::startAdvertising();
+    }
+  }
 }
 
 void scanMatrix() {
@@ -824,6 +867,28 @@ void processCommand(String cmd) {
       executeShortcut(btnIdx);
       Serial.println("<TESTED>");
     }
+  } else if (cmd == "GETNAME") {
+    Serial.print(F("<NAME:"));
+    Serial.print(bleName);
+    Serial.println(F(">"));
+  } else if (cmd.startsWith("SETNAME:")) {
+    String newName = cmd.substring(8);
+    newName.trim();
+    if (newName.length() > 0 && newName.length() <= 32) {
+      Preferences devicePrefs;
+      if (devicePrefs.begin("device", false)) {
+        devicePrefs.putString("name", newName.c_str());
+        devicePrefs.end();
+      }
+      Serial.println(F("<NAME_SET>"));
+      delay(100);
+      ESP.restart();
+    } else {
+      Serial.println(F("<ERROR:BAD_NAME>"));
+    }
+  } else if (cmd == "CLEARBONDS") {
+    NimBLEDevice::deleteAllBonds();
+    Serial.println(F("<BONDS_CLEARED>"));
   }
 }
 
@@ -981,11 +1046,28 @@ void loadAllNames() {
   }
 }
 
+void updateBleStatusDisplay() {
+  bleDisplayNeedsUpdate = false;
+  // Redraw just the right side of the header bar with current BLE state.
+  tftFillRect(172, 0, DISPLAY_WIDTH - 172, 22, TEAL);
+  if (bleConnected) {
+    tftPrintF(175, 8, F("BLE ON"), GREEN);
+  } else {
+    tftPrintF(172, 8, F("BLE ADV"), GRAY);
+  }
+}
+
 void drawButtonGrid() {
   tftFillRect(0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT, BGDARK);
 
   tftFillRect(0, 0, DISPLAY_WIDTH, 22, TEAL);
-  tftPrintF(93, 8, F("SHORTCUTS"), WHITE);
+  tftPrintF(8, 8, F("SHORTCUTS"), WHITE);
+  // BLE status on the right side of the header
+  if (bleConnected) {
+    tftPrintF(175, 8, F("BLE ON"), GREEN);
+  } else {
+    tftPrintF(172, 8, F("BLE ADV"), GRAY);
+  }
 
   int margin = 2;
   int boxW = (DISPLAY_WIDTH - margin * 5) / 4;
@@ -1219,6 +1301,14 @@ void executeShortcut(int btnIdx) {
         else bleReleaseRaw(rawHidCode);
       }
       delay(20);
+    } else if (action == STEP_DELAY) {
+      uint16_t ms = ((uint16_t)keyType << 8) | keyCode;
+      delay(ms);
+    } else if (action == STEP_DELAY_DYNAMIC) {
+      uint16_t minMs = (uint16_t)keyType * 20;
+      uint16_t maxMs = (uint16_t)keyCode * 20;
+      if (maxMs <= minMs) maxMs = minMs + 20;
+      delay((uint16_t)random(minMs, maxMs));
     }
   }
 

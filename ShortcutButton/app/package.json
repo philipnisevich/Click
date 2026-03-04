@@ -1,0 +1,23 @@
+{
+  "name": "shortcut-button",
+  "version": "1.0.0",
+  "description": "ShortcutButton configurator",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder --mac"
+  },
+  "build": {
+    "appId": "com.click.shortcutbutton",
+    "productName": "ShortcutButton",
+    "mac": {
+      "category": "public.app-category.utilities",
+      "target": [{ "target": "dmg", "arch": ["arm64", "x64"] }]
+    },
+    "files": ["main.js", "web/**"]
+  },
+  "devDependencies": {
+    "electron": "^35.0.0",
+    "electron-builder": "^25.0.0"
+  }
+}
