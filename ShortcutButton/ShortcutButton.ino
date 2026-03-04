@@ -36,6 +36,7 @@
 Preferences prefs;
 bool storageReady = false;
 
+
 char bleName[64] = "ShortcutButton";  // loaded from NVS before BLE init
 const char *BLE_MANUFACTURER = "Click";
 NimBLEHIDDevice      *bleHid          = nullptr;
@@ -44,6 +45,9 @@ NimBLECharacteristic *bleKeyboardOutput = nullptr;
 bool bleConnected  = false;
 bool bleSubscribed = false;
 volatile bool bleDisplayNeedsUpdate = false;
+uint16_t bleConnHandle = BLE_HS_CONN_HANDLE_NONE;
+bool bleEncrypted = false;
+
 uint8_t bleKeyReport[8] = {0};
 
 // Standard 8-byte keyboard report (raw bytes):
@@ -107,32 +111,67 @@ class ShortcutBleServerCallbacks : public NimBLEServerCallbacks {
   void onConnect(NimBLEServer *, NimBLEConnInfo &info) override {
     bleConnected  = true;
     bleSubscribed = false;
+    bleConnHandle = info.getConnHandle();
+    bleEncrypted = info.isEncrypted();
     bleDisplayNeedsUpdate = true;
-    Serial.printf("<BLE:CONNECTED:conn=%u:bond=%u>\n",
-      info.getConnHandle(), info.isBonded() ? 1 : 0);
+    Serial.printf("<BLE:CONNECTED:conn=%u:bond=%u:enc=%u>\n",
+      bleConnHandle, info.isBonded() ? 1 : 0, bleEncrypted ? 1 : 0);
+
+    if (!bleEncrypted) {
+      int secRc = 0;
+      bool secStarted = NimBLEDevice::startSecurity(bleConnHandle, &secRc);
+      Serial.printf("<BLE:SECURITY_REQ:conn=%u:started=%u:rc=%d>\n",
+        bleConnHandle, secStarted ? 1 : 0, secRc);
+    }
   }
   void onDisconnect(NimBLEServer *, NimBLEConnInfo &info, int reason) override {
     bleConnected  = false;
     bleSubscribed = false;
+    bleConnHandle = BLE_HS_CONN_HANDLE_NONE;
+    bleEncrypted = false;
     bleDisplayNeedsUpdate = true;
     memset(bleKeyReport, 0, sizeof(bleKeyReport));
     Serial.printf("<BLE:DISCONNECTED:conn=%u:reason=%d>\n", info.getConnHandle(), reason);
     NimBLEDevice::startAdvertising();
   }
   void onAuthenticationComplete(NimBLEConnInfo &info) override {
+    bleEncrypted = info.isEncrypted();
     Serial.printf("<BLE:AUTH_DONE:conn=%u:enc=%u:bond=%u>\n",
       info.getConnHandle(),
-      info.isEncrypted() ? 1 : 0,
+      bleEncrypted ? 1 : 0,
       info.isBonded() ? 1 : 0);
+
+    if (!bleEncrypted) {
+      Serial.printf("<BLE:AUTH_FAIL:conn=%u>\n", info.getConnHandle());
+      NimBLEDevice::getServer()->disconnect(info.getConnHandle());
+    }
   }
 };
 
-void bleSendReport() {
-  if (!bleConnected || !bleSubscribed) return;
-  if (bleKeyboardInput != nullptr) {
+bool bleReadyForReports() {
+  return bleConnected &&
+    bleEncrypted &&
+    bleConnHandle != BLE_HS_CONN_HANDLE_NONE &&
+    bleKeyboardInput != nullptr;
+}
+
+bool bleSendReport() {
+  if (!bleReadyForReports()) return false;
+
+  // Send directly to the active connection so we don't depend on a fresh
+  // onSubscribe callback after host-side reconnect caching behavior.
+  bool sent = bleKeyboardInput->notify(bleKeyReport, sizeof(bleKeyReport), bleConnHandle);
+  if (!sent) {
+    // Fallback to the standard subscribed-client path.
     bleKeyboardInput->setValue(bleKeyReport, sizeof(bleKeyReport));
-    bleKeyboardInput->notify();
+    sent = bleKeyboardInput->notify();
   }
+
+  if (!sent) {
+    Serial.printf("<BLE:NOTIFY_FAIL:conn=%u:enc=%u:sub=%u>\n",
+      bleConnHandle, bleEncrypted ? 1 : 0, bleSubscribed ? 1 : 0);
+  }
+  return sent;
 }
 
 void bleReleaseAll() {
@@ -148,7 +187,7 @@ void bleReleaseAll() {
 }
 
 bool blePressRaw(uint8_t rawHidCode) {
-  if (!bleConnected || !bleSubscribed || rawHidCode == 0) return false;
+  if (!bleReadyForReports() || rawHidCode == 0) return false;
   bool changed = false;
 
   if (rawHidCode >= 0xE0 && rawHidCode <= 0xE7) {
@@ -175,7 +214,7 @@ bool blePressRaw(uint8_t rawHidCode) {
 }
 
 bool bleReleaseRaw(uint8_t rawHidCode) {
-  if (!bleConnected || !bleSubscribed || rawHidCode == 0) return false;
+  if (!bleReadyForReports() || rawHidCode == 0) return false;
   bool changed = false;
 
   if (rawHidCode >= 0xE0 && rawHidCode <= 0xE7) {
@@ -198,7 +237,7 @@ bool bleReleaseRaw(uint8_t rawHidCode) {
 }
 
 bool bleTypeChar(char c) {
-  if (!bleConnected || !bleSubscribed) return false;
+  if (!bleReadyForReports()) return false;
 
   const uint8_t idx = static_cast<uint8_t>(c);
   if (idx >= KEYMAP_SIZE) return false;
@@ -223,10 +262,10 @@ bool bleTypeChar(char c) {
 
 bool waitForBleConnection(unsigned long timeoutMs) {
   unsigned long start = millis();
-  while (!(bleConnected && bleSubscribed) && (millis() - start < timeoutMs)) {
+  while (!(bleConnected && bleEncrypted) && (millis() - start < timeoutMs)) {
     delay(5);
   }
-  return bleConnected && bleSubscribed;
+  return bleConnected && bleEncrypted;
 }
 
 void configureRandomStaticAddress() {
@@ -277,11 +316,8 @@ void setupBleKeyboard() {
   adv->addServiceUUID(bleHid->getDeviceInfoService()->getUUID());
   adv->addServiceUUID(bleHid->getBatteryService()->getUUID());
   adv->setPreferredParams(0x0006, 0x0012);
-  NimBLEDevice::startAdvertising();
-
-  Serial.print(F("<BLE:ADVERTISING:"));
-  Serial.print(bleName);
-  Serial.println(F(">"));
+  // Advertising is started at the END of setup(), after full initialization,
+  // so the host can only connect to a fully-ready device.
 }
 
 // Display pins (J1 left header)
@@ -672,9 +708,8 @@ byte modifierBitToRawHid(byte modBit) {
 }
 
 void setup() {
-  // On a cold power-on (ESP_RST_POWERON) the USB boot sequence interferes
-  // with BLE initialisation. A single automatic soft-reset makes every cold
-  // boot behave exactly like pressing the reset button — no delays, no checks.
+  // On a cold power-on the USB boot sequence interferes with BLE radio init.
+  // A single soft-reset makes every cold boot behave like a button-press reset.
   if (esp_reset_reason() == ESP_RST_POWERON) {
     ESP.restart();
   }
@@ -713,7 +748,9 @@ void setup() {
     }
   }
 
-  // Start BLE before USB to avoid any radio interference during USB enumeration.
+  // Init BLE stack (radio + services) but do NOT start advertising yet.
+  // Advertising starts at the end of setup() so the host can only connect
+  // to a fully-initialized device, preventing partial-state connections.
   setupBleKeyboard();
 
   // USB / Serial
@@ -736,6 +773,30 @@ void setup() {
 
   // Draw initial grid
   drawButtonGrid();
+
+  // Sync button state from actual pin readings.
+  // lastDebounceTime was initialized to 0, but millis() is now ~2+ seconds,
+  // so without this every button would immediately pass the debounce check and
+  // any button reading LOW on the first scanMatrix() call would fire spuriously.
+  for (int r = 0; r < ROWS; r++) {
+    digitalWrite(rowPins[r], LOW);
+    delayMicroseconds(10);
+    for (int c = 0; c < COLS; c++) {
+      int idx = r * COLS + c;
+      byte reading = (byte)digitalRead(colPins[c]);
+      lastButtonState[idx] = reading;
+      buttonState[idx]      = reading;
+      lastDebounceTime[idx] = millis();
+    }
+    digitalWrite(rowPins[r], HIGH);
+  }
+
+  // Everything is initialized — now allow the host to connect.
+  // Starting advertising here ensures any incoming connection sees a
+  // fully-ready device (storage loaded, display drawn, buttons synced).
+  NimBLEDevice::startAdvertising();
+  Serial.printf("<BLE:ADV_START:reason=%d:ms=%lu>\n",
+    (int)esp_reset_reason(), millis());
 }
 
 void loop() {
@@ -747,9 +808,9 @@ void loop() {
     updateBleStatusDisplay();
   }
 
-  // If BLE advertising stopped for any reason, restart it every 5 seconds until connected.
+  // If BLE advertising stopped for any reason, restart it every second until connected.
   static unsigned long lastAdvCheck = 0;
-  if (!bleConnected && millis() - lastAdvCheck > 5000) {
+  if (!bleConnected && millis() - lastAdvCheck > 1000) {
     lastAdvCheck = millis();
     if (!NimBLEDevice::getAdvertising()->isAdvertising()) {
       NimBLEDevice::startAdvertising();
@@ -803,6 +864,11 @@ void handleSerial() {
       serialBuffer = "";
     } else if (receiving) {
       serialBuffer += c;
+      if (serialBuffer.length() > 512) {
+        // Malformed packet — no closing '>' after 512 chars; discard to prevent OOM.
+        receiving = false;
+        serialBuffer = "";
+      }
     }
   }
 }
@@ -844,10 +910,10 @@ void processCommand(String cmd) {
     Serial.println("<PONG>");
   } else if (cmd == "SDSTATUS") {
     Serial.println(storageReady ? "<SD:OK>" : "<SD:ERROR>");
-    Serial.println(bleConnected ? "<KB:OK>" : "<KB:FAIL>");
+    Serial.println(bleReadyForReports() ? "<KB:OK>" : "<KB:FAIL>");
   } else if (cmd == "KBTEST") {
     Serial.print(F("<KBTEST:BLE="));
-    Serial.print(bleConnected ? "1" : "0");
+    Serial.print(bleReadyForReports() ? "1" : "0");
     Serial.println(F(">"));
 
     if (!waitForBleConnection(1500)) {
