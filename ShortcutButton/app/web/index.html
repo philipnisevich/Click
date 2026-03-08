@@ -75,30 +75,28 @@
       letter-spacing: 1px; color: #3f3f46;
     }
     .key-grid {
-      display: grid; grid-template-columns: repeat(4, 1fr); grid-template-rows: repeat(4, 1fr); gap: 5px;
+      display: grid; grid-template-columns: repeat(4, 1fr); grid-template-rows: repeat(4, 1fr); gap: 4px;
       width: calc(300px - 28px); height: calc(300px - 28px); flex-shrink: 0;
+      padding: 4px; border-radius: 8px;
     }
     .key-btn {
       display: flex; flex-direction: column; align-items: center; justify-content: center;
-      background: #222; border: 1.5px solid #2e2e2e; border-radius: 7px;
-      cursor: pointer; transition: background .14s, border-color .14s; padding: 3px; position: relative;
+      border: 1.5px solid #2e2e2e; border-radius: 7px;
+      cursor: pointer; transition: all .14s; padding: 3px; position: relative;
       width: 100%; height: 100%; min-width: 0; min-height: 0; overflow: hidden;
     }
-    .key-btn:hover { background: #2a2a2a; border-color: #3f3f46; }
-    .key-btn.has-macro { border-color: #16a34a50; background: #16a34a0a; }
-    .key-btn.selected { border-color: #dc2626; background: #dc26260f; }
+    .key-btn.selected { outline: 2px solid #fff; outline-offset: -1px; z-index: 1; }
     .key-btn.pressed  { animation: key-flash .3s ease; }
-    @keyframes key-flash { 50% { background: #16a34a25; } }
-    .key-num  { font-size: 10px; font-weight: 700; color: #52525b; line-height: 1; }
-    .key-btn.has-macro .key-num { color: #4ade80; }
-    .key-btn.selected  .key-num { color: #f87171; }
+    @keyframes key-flash { 0%{opacity:1} 50%{opacity:.6} 100%{opacity:1} }
+    .key-num  { font-size: 10px; font-weight: 700; line-height: 1; }
     .key-name {
-      font-size: 7px; color: #3f3f46; text-align: center;
+      font-size: 7px; text-align: center;
       max-width: 100%; overflow: hidden; white-space: normal; line-height: 1.2; margin-top: 2px;
       flex-shrink: 1; min-height: 0;
     }
-    .key-btn.has-macro .key-name { color: #4ade80aa; }
-    .sidebar-foot { margin-top: auto; }
+    .sidebar-foot { margin-top: auto; display: flex; gap: 6px; }
+    .reorder-mode .key-btn { cursor: grab; animation: wobble 0.3s infinite alternate; }
+    @keyframes wobble { from{transform:rotate(-0.5deg)} to{transform:rotate(0.5deg)} }
 
 
     /* ── Editor ── */
@@ -127,6 +125,13 @@
     .name-input:focus { border-color: #dc2626; }
     .name-input:disabled { opacity: .35; cursor: not-allowed; }
     .name-sep { color: #3f3f46; font-size: 13px; }
+    .remove-line2-btn {
+      width: 18px; height: 18px; border-radius: 50%; background: #dc2626; border: none;
+      color: #fff; font-size: 12px; font-weight: 700; cursor: pointer;
+      display: none; align-items: center; justify-content: center; flex-shrink: 0;
+      line-height: 1; padding: 0; transition: background .15s;
+    }
+    .remove-line2-btn:hover { background: #b91c1c; }
     .header-spacer { flex: 1; }
 
     /* Steps area */
@@ -311,6 +316,83 @@
     .log-entry.error   { color: #ef4444; }
     .log-entry.warning { color: #f59e0b; }
 
+    /* ── Right sidebar (Display) ── */
+    .display-sidebar {
+      width: 250px; flex-shrink: 0;
+      background: #161616; border-left: 1px solid #252525;
+      display: flex; flex-direction: column; padding: 14px; gap: 12px; overflow-y: auto;
+    }
+    .display-label {
+      font-size: 10px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 1px; color: #3f3f46;
+    }
+    .theme-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; }
+    .theme-swatch {
+      aspect-ratio: 1; border-radius: 8px; cursor: pointer;
+      border: 2px solid #2e2e2e; position: relative; overflow: hidden;
+      transition: border-color .15s, transform .1s;
+    }
+    .theme-swatch:hover { border-color: #52525b; transform: scale(1.04); }
+    .theme-swatch.active { border-color: #dc2626; }
+    .theme-swatch-inner {
+      width: 100%; height: 100%; display: grid; grid-template-columns: 1fr 1fr;
+      grid-template-rows: 1fr 1fr; gap: 2px; padding: 4px;
+    }
+    .theme-swatch-cell { border-radius: 3px; }
+    .theme-swatch-name {
+      position: absolute; bottom: 0; left: 0; right: 0;
+      font-size: 8px; font-weight: 700; text-align: center;
+      padding: 2px; background: rgba(0,0,0,.55); color: #fff;
+      letter-spacing: .3px;
+    }
+    .custom-controls { display: flex; flex-direction: column; gap: 8px; }
+    .custom-controls.hidden { display: none; }
+    .color-row {
+      display: flex; align-items: center; gap: 8px;
+    }
+    .color-row label { font-size: 11px; color: #71717a; white-space: nowrap; min-width: 70px; }
+    .color-swatch {
+      width: 28px; height: 22px; border-radius: 4px; border: 1.5px solid #555;
+      cursor: pointer; flex-shrink: 0; transition: border-color .12s;
+    }
+    .color-swatch:hover { border-color: #dc2626; }
+    /* ── Centered text helper ── */
+    .btn-center { justify-content: center; text-align: center; }
+
+    /* Color palette popover */
+    .color-palette-popover {
+      position: fixed; z-index: 1100; background: #1e1e1e; border: 1px solid #2e2e2e;
+      border-radius: 10px; padding: 10px; box-shadow: 0 10px 30px rgba(0,0,0,.6);
+      width: 208px;
+    }
+    .color-palette-popover.hidden { display: none; }
+    .palette-label { font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: .8px; color: #3f3f46; margin-bottom: 5px; }
+    .palette-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 4px; margin-bottom: 8px; }
+    .palette-swatch {
+      width: 28px; height: 28px; border-radius: 5px; border: 1.5px solid #333;
+      cursor: pointer; transition: transform .1s, border-color .12s;
+    }
+    .palette-swatch:hover { transform: scale(1.15); border-color: #fff; z-index: 1; }
+    .palette-swatch.active { border-color: #dc2626; border-width: 2px; }
+    .recent-colors { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 8px; min-height: 28px; }
+    .recent-colors:empty::after { content: 'None yet'; font-size: 10px; color: #3f3f46; }
+    .palette-custom-row { display: flex; align-items: center; gap: 6px; }
+    .palette-custom-row input[type="color"] {
+      width: 28px; height: 28px; border: 1px solid #333; border-radius: 5px;
+      background: #222; cursor: pointer; padding: 1px;
+    }
+    .palette-custom-row span { font-size: 11px; color: #71717a; }
+
+    /* ── Drag-and-drop ── */
+    .key-btn.dragging { opacity: .3; }
+    .key-btn.drag-over { border-color: #dc2626 !important; background: #dc26261a !important; }
+    .drag-ghost {
+      position: fixed; z-index: 2000; pointer-events: none; opacity: .85;
+      border-radius: 7px; border: 1.5px solid #dc2626; background: #222;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      box-shadow: 0 8px 24px rgba(0,0,0,.5);
+    }
+
     ::-webkit-scrollbar { width: 4px; }
     ::-webkit-scrollbar-track { background: transparent; }
     ::-webkit-scrollbar-thumb { background: #2e2e2e; border-radius: 2px; }
@@ -344,7 +426,8 @@
 
 
         <div class="sidebar-foot">
-          <button id="clear-all-btn" class="btn btn-danger" style="width:100%" disabled>Clear All</button>
+          <button id="reorder-btn" class="btn btn-ghost" style="flex:1;justify-content:center" disabled>Reorder</button>
+          <button id="clear-all-btn" class="btn btn-danger" style="flex:1;justify-content:center" disabled>Clear All</button>
         </div>
       </aside>
 
@@ -353,6 +436,13 @@
         <div id="editor-empty" class="editor-empty">
           <div class="editor-empty-icon">⌨</div>
           <div>Select a button to edit its macro</div>
+        </div>
+
+        <!-- Reorder mode overlay -->
+        <div id="reorder-overlay" class="editor-empty" style="display:none">
+          <div style="font-size:32px;opacity:.3">↕</div>
+          <div style="font-size:14px;font-weight:600;color:#e4e4e7">Reorder Mode</div>
+          <div style="font-size:12px;color:#71717a;max-width:260px;text-align:center;line-height:1.6">Drag buttons in the grid to rearrange them. Click <strong>Done</strong> when finished to resume editing.</div>
         </div>
 
         <div id="editor-content" class="editor-content hidden">
@@ -365,10 +455,26 @@
                 <input id="name-line1" class="name-input" maxlength="8" placeholder="Line 1" disabled />
                 <span id="name-sep" class="name-sep" style="display:none">·</span>
                 <input id="name-line2" class="name-input" maxlength="8" placeholder="Line 2" disabled style="display:none" />
+                <button id="remove-line2-btn" class="remove-line2-btn" title="Remove Line 2">×</button>
               </div>
             </div>
             <button id="add-name-line-btn" class="btn btn-ghost" disabled style="font-size:11px;padding:4px 9px">+ Line 2</button>
             <div class="header-spacer"></div>
+          </div>
+
+          <!-- Per-button colors (custom theme only) -->
+          <div id="btn-color-controls" style="display:none;padding:8px 18px;border-bottom:1px solid #222;background:#1a1a1a;flex-shrink:0">
+            <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+              <span style="font-size:9px;font-weight:700;color:#52525b;text-transform:uppercase;letter-spacing:.8px">Active:</span>
+              <div class="color-row" style="gap:4px"><label style="min-width:auto;font-size:10px">Fill</label><div class="color-swatch" data-target="btn:1"></div></div>
+              <div class="color-row" style="gap:4px"><label style="min-width:auto;font-size:10px">Border</label><div class="color-swatch" data-target="btn:3"></div></div>
+              <div class="color-row" style="gap:4px"><label style="min-width:auto;font-size:10px">Text</label><div class="color-swatch" data-target="btn:4"></div></div>
+              <span style="font-size:9px;font-weight:700;color:#52525b;text-transform:uppercase;letter-spacing:.8px;margin-left:8px">Empty:</span>
+              <div class="color-row" style="gap:4px"><label style="min-width:auto;font-size:10px">Fill</label><div class="color-swatch" data-target="btn:0"></div></div>
+              <div class="color-row" style="gap:4px"><label style="min-width:auto;font-size:10px">Border</label><div class="color-swatch" data-target="btn:2"></div></div>
+              <div class="color-row" style="gap:4px"><label style="min-width:auto;font-size:10px">Text</label><div class="color-swatch" data-target="btn:5"></div></div>
+              <button id="btn-color-reset-all" class="btn btn-ghost" style="font-size:10px;padding:2px 8px;margin-left:auto">Reset</button>
+            </div>
           </div>
 
           <!-- Steps -->
@@ -387,6 +493,24 @@
           </div>
         </div>
       </main>
+
+      <!-- Right sidebar: Display customization -->
+      <aside class="display-sidebar">
+        <div class="display-label">Display</div>
+        <div id="theme-grid" class="theme-grid"></div>
+        <div id="custom-controls" class="custom-controls hidden">
+          <div class="display-label" style="margin-top:4px">Theme Colors</div>
+          <div class="color-row"><label>Background</label><div class="color-swatch" data-target="theme:0"></div></div>
+          <div class="color-row"><label>Header</label><div class="color-swatch" data-target="theme:1"></div></div>
+          <div class="color-row"><label>Card Off</label><div class="color-swatch" data-target="theme:2"></div></div>
+          <div class="color-row"><label>Card On</label><div class="color-swatch" data-target="theme:3"></div></div>
+          <div class="color-row"><label>Border Off</label><div class="color-swatch" data-target="theme:4"></div></div>
+          <div class="color-row"><label>Border On</label><div class="color-swatch" data-target="theme:5"></div></div>
+          <div class="color-row"><label>Text On</label><div class="color-swatch" data-target="theme:7"></div></div>
+          <div class="color-row"><label>Text Off</label><div class="color-swatch" data-target="theme:8"></div></div>
+        </div>
+        <!-- Per-button colors moved to editor section -->
+      </aside>
     </div>
 
     <!-- Log -->
@@ -406,6 +530,19 @@
     <div class="popover-item" data-type="delay">  <span class="pop-icon">⏱</span> Fixed Delay</div>
   </div>
 
+  <!-- Color palette popover -->
+  <div id="color-palette-popover" class="color-palette-popover hidden">
+    <div class="palette-label">Preset Colors</div>
+    <div id="palette-grid" class="palette-grid"></div>
+    <div class="palette-label">Recent</div>
+    <div id="recent-colors" class="recent-colors"></div>
+    <div class="palette-label">Custom</div>
+    <div class="palette-custom-row">
+      <input type="color" id="palette-custom-picker" value="#B8A070" />
+      <span>Pick any color</span>
+    </div>
+  </div>
+
   <!-- Key capture modal -->
   <div id="key-capture-overlay" class="modal-overlay hidden">
     <div class="modal-box">
@@ -421,11 +558,14 @@
     <div class="record-box">
       <div class="record-pulse"></div>
       <h3>Recording</h3>
-      <p>Press and release keys. Each press and release is captured as a separate step. Click Stop when finished.</p>
+      <p>Press and release keys. Each press and release is captured as a separate step.</p>
       <div id="record-preview" class="record-preview">
         <div class="rec-empty">Waiting for keys…</div>
       </div>
-      <button id="stop-record-btn" class="btn btn-primary" style="width:100%">Stop Recording</button>
+      <div style="display:flex;gap:10px;justify-content:space-between">
+        <button id="cancel-record-btn" class="btn btn-ghost" style="flex:1;justify-content:center">Cancel</button>
+        <button id="save-record-btn" class="btn btn-primary" style="flex:1;justify-content:center">Save Recording</button>
+      </div>
     </div>
   </div>
 
@@ -450,6 +590,9 @@
 
     // Popover state
     let popoverInsertAt = null; // null = append at end
+
+    // Delay defaults
+    let lastDelayMs = 100;
 
     // ── Constants ──
     const STEP_PRESS = 1, STEP_RELEASE = 2, STEP_TYPE = 3, STEP_DELAY = 4;
@@ -582,24 +725,37 @@
       const l2El = document.getElementById('name-line2');
       const sep  = document.getElementById('name-sep');
       const addBtn = document.getElementById('add-name-line-btn');
+      const rmBtn  = document.getElementById('remove-line2-btn');
       if (name.length > 8) {
         l1El.value = name.substring(0,8).trim();
         l2El.value = name.substring(8,16).trim();
         l2El.disabled = false; l2El.style.display = 'block'; sep.style.display = '';
-        addBtn.style.display = 'none';
+        addBtn.style.display = 'none'; rmBtn.style.display = 'flex';
       } else {
         l1El.value = name.trim();
         l2El.value = ''; l2El.disabled = true; l2El.style.display = 'none'; sep.style.display = 'none';
-        addBtn.style.display = '';
+        addBtn.style.display = ''; rmBtn.style.display = 'none';
       }
     }
 
     document.getElementById('add-name-line-btn').addEventListener('click', () => {
       const l2El = document.getElementById('name-line2');
       const sep  = document.getElementById('name-sep');
+      const rmBtn = document.getElementById('remove-line2-btn');
       l2El.disabled = false; l2El.style.display = 'block'; sep.style.display = '';
+      rmBtn.style.display = 'flex';
       l2El.focus();
       document.getElementById('add-name-line-btn').style.display = 'none';
+    });
+
+    document.getElementById('remove-line2-btn').addEventListener('click', () => {
+      const l2El = document.getElementById('name-line2');
+      const sep  = document.getElementById('name-sep');
+      const rmBtn = document.getElementById('remove-line2-btn');
+      l2El.value = ''; l2El.disabled = true; l2El.style.display = 'none';
+      sep.style.display = 'none'; rmBtn.style.display = 'none';
+      document.getElementById('add-name-line-btn').style.display = '';
+      updateToolbar();
     });
 
     const nameFilter = /[^A-Za-z0-9 !"#$%&'()*+,\-.\/;=?@]/g;
@@ -661,7 +817,8 @@
         val.className += ' text-val'; val.textContent = `"${step.text}"`;
       } else if (step.action === 'delay') {
         badge.className += ' badge-delay'; badge.textContent = '⏱ Delay';
-        val.className += ' time-val'; val.textContent = `${step.ms} ms`;
+        val.className += ' time-val';
+        val.textContent = step.ms >= 1000 ? `${(step.ms/1000).toFixed(2).replace(/\.?0+$/,'')} sec` : `${step.ms} ms`;
       }
 
       const del = document.createElement('button');
@@ -778,17 +935,41 @@
         });
 
       } else if (type === 'delay') {
+        const isSec = lastDelayMs >= 1000;
+        const initVal = isSec ? (lastDelayMs / 1000) : lastDelayMs;
+        const initUnit = isSec ? 'sec' : 'ms';
         row.innerHTML = `
           <label>⏱ Fixed Delay:</label>
-          <input class="inp-sm" type="number" min="10" max="60000" step="10" value="100" />
-          <label>ms</label>
+          <input class="inp-sm" type="number" min="${isSec?'0.01':'10'}" max="${isSec?'60':'60000'}" step="${isSec?'0.01':'10'}" value="${initVal}" />
+          <select id="delay-unit" style="padding:4px 6px;background:#222;border:1px solid #333;border-radius:5px;color:#e4e4e7;font-size:12px;outline:none;">
+            <option value="ms" ${initUnit==='ms'?'selected':''}>ms</option>
+            <option value="sec" ${initUnit==='sec'?'selected':''}>sec</option>
+          </select>
           <button class="btn btn-success" id="inp-confirm">Add</button>
           <button class="btn btn-ghost"   id="inp-cancel">✕</button>`;
         appendInputRow(row, insertAt);
         const inp = row.querySelector('input');
+        const unitSel = row.querySelector('#delay-unit');
         inp.focus(); inp.select();
+        unitSel.addEventListener('change', () => {
+          const curVal = parseFloat(inp.value) || 0;
+          if (unitSel.value === 'sec') {
+            inp.value = (curVal / 1000).toFixed(2);
+            inp.min = '0.01'; inp.max = '60'; inp.step = '0.01';
+          } else {
+            inp.value = Math.round(curVal * 1000);
+            inp.min = '10'; inp.max = '60000'; inp.step = '10';
+          }
+        });
         row.querySelector('#inp-confirm').addEventListener('click', () => {
-          const ms = Math.max(10, Math.min(60000, parseInt(inp.value)||100));
+          let ms;
+          if (unitSel.value === 'sec') {
+            ms = Math.round(parseFloat(inp.value) * 1000) || 100;
+          } else {
+            ms = parseInt(inp.value) || 100;
+          }
+          ms = Math.max(10, Math.min(60000, ms));
+          lastDelayMs = ms;
           doInsert({ action:'delay', ms }, insertAt); row.remove();
         });
         inp.addEventListener('keydown', e => {
@@ -821,9 +1002,10 @@
 
     // ── Recording ──
     document.getElementById('record-btn').addEventListener('click', () => {
-      if (isRecording) stopRecording(); else startRecording();
+      if (isRecording) cancelRecording(); else startRecording();
     });
-    document.getElementById('stop-record-btn').addEventListener('click', stopRecording);
+    document.getElementById('save-record-btn').addEventListener('click', saveRecording);
+    document.getElementById('cancel-record-btn').addEventListener('click', cancelRecording);
 
     function startRecording() {
       isRecording = true; recordedSteps = []; recordingPressed.clear();
@@ -833,7 +1015,7 @@
       document.getElementById('record-preview').innerHTML = '<div class="rec-empty">Waiting for keys…</div>';
     }
 
-    function stopRecording() {
+    function saveRecording() {
       isRecording = false;
       document.getElementById('record-btn').classList.remove('recording');
       document.getElementById('record-btn').textContent = '⏺ Record';
@@ -842,6 +1024,14 @@
         commandSteps.push(...recordedSteps);
         renderSteps(); updateToolbar();
       }
+      recordedSteps = [];
+    }
+
+    function cancelRecording() {
+      isRecording = false;
+      document.getElementById('record-btn').classList.remove('recording');
+      document.getElementById('record-btn').textContent = '⏺ Record';
+      document.getElementById('record-overlay').classList.add('hidden');
       recordedSteps = [];
     }
 
@@ -964,7 +1154,7 @@
         updateConnectionUI(true);
         log('Connected', 'success');
         readLoop();
-        setTimeout(() => sendCommand('GETALL'), 500);
+        setTimeout(() => { sendCommand('GETALL'); sendCommand('GETTHEME'); }, 500);
       } catch (err) {
         log(`Connection failed: ${err.message}`, 'error');
       }
@@ -986,8 +1176,11 @@
       readLoopRunning = false; reader = null; writer = null; port = null; isConnected = false;
       for (let i=0;i<16;i++) { buttonShortcuts[i]=[]; buttonNames[i]=''; updateKeyBtn(i); }
       selectedButton = null; commandSteps = [];
+      workingBtnColors.fill(null); appliedBtnColors.fill(null); btnColorDirty = false;
       document.getElementById('editor-empty').style.display = '';
       document.getElementById('editor-content').classList.add('hidden');
+      const bcc = document.getElementById('btn-color-controls');
+      if (bcc) bcc.style.display = 'none';
       updateConnectionUI(false);
     }
 
@@ -998,6 +1191,7 @@
       document.getElementById('connect-btn').disabled    = connected;
       document.getElementById('disconnect-btn').disabled = !connected;
       document.getElementById('clear-all-btn').disabled  = !connected;
+      document.getElementById('reorder-btn').disabled   = !connected;
       updateToolbar();
     }
 
@@ -1058,6 +1252,12 @@
         log(`Button ${idx+1} pressed`, 'info'); flashKeyBtn(idx);
       }
       else if (msg === 'BONDS_CLEARED'){ log('Pairing data cleared — re-pair the device', 'warning'); }
+      else if (msg === 'THEME_SET')     { log('Theme applied','success'); }
+      else if (msg === 'COLORS_SET')    { log('Custom colors applied','success'); }
+      else if (msg === 'BTNCOLOR_SET')  { log('Button color set','success'); }
+      else if (msg === 'SWAPPED')       { log('Buttons swapped','success'); }
+      else if (msg.startsWith('THEME:'))   { parseThemeResponse(msg.substring(6)); }
+      else if (msg.startsWith('BTNCOLOR:')){ parseBtnColorResponse(msg.substring(9)); }
       else if (msg.startsWith('BLE:'))   { log('[BLE] '+msg.substring(4),'info'); }
       else if (msg.startsWith('DEBUG:')) { log('[DBG] '+msg.substring(6),'warning'); }
       else if (msg.startsWith('ERROR:')) { log('[ERR] '+msg.substring(6),'error'); }
@@ -1103,6 +1303,7 @@
     // ── Save ──
     async function saveShortcut() {
       if (selectedButton===null) return;
+      const btnIdx = selectedButton;
       const name = getDisplayName();
       const parts = commandSteps.map(step => {
         if (step.action==='type')
@@ -1116,8 +1317,9 @@
         const ktype  = info.isModifier ? KEY_TYPE_MODIFIER : KEY_TYPE_REGULAR;
         return `${action},${ktype},${info.hid}`;
       });
-      await sendCommand(`STEPS:${selectedButton}:${name}:${parts.join(';')}`);
-      log(`Saving "${name||'unnamed'}" → Button ${selectedButton+1}…`, 'info');
+      await sendCommand(`STEPS:${btnIdx}:${name}:${parts.join(';')}`);
+      btnColorDirty = false;
+      log(`Saving "${name||'unnamed'}" → Button ${btnIdx+1}…`, 'info');
     }
 
     // ── Log ──
@@ -1140,6 +1342,444 @@
     document.getElementById('clear-all-btn').addEventListener('click', () => {
       if (confirm('Clear ALL button shortcuts?')) sendCommand('CLEARALL');
     });
+
+    // ══════════════════════════════════════════════════════
+    // ── Theme & Color System ──
+    // ══════════════════════════════════════════════════════
+
+    // State: working = app preview, applied = on device
+    // Theme: 9 slots [bg, hdr, cardOff, cardOn, bordOff, bordOn, numDim, txOn, txOff]
+    // Per-btn: 6 slots [cardOff, cardOn, bordOff, bordOn, txOn, txOff] per button, null=default
+    let currentThemeId = 0;
+    let workingTheme = [0xCDD3,0x7B49,0xDE97,0xBD0E,0x9C4D,0x8B42,0xA490,0x3963,0x9C4D];
+    let appliedTheme = [...workingTheme];
+    let workingBtnColors = Array.from({length:16}, ()=>null);
+    let appliedBtnColors = Array.from({length:16}, ()=>null);
+    let btnColorDirty = false;
+    let commandQueue = Promise.resolve();
+
+    function queueCommand(cmd) {
+      commandQueue = commandQueue.then(() => sendCommand(cmd));
+      return commandQueue;
+    }
+
+    function buttonHasMacroAt(idx) {
+      return (buttonShortcuts[idx]?.length || 0) > 0;
+    }
+
+    function btnColorSlotAffectsCurrentDisplay(idx, slot) {
+      const activeSlots = [1, 3, 4];
+      const emptySlots = [0, 2, 5];
+      return buttonHasMacroAt(idx) ? activeSlots.includes(slot) : emptySlots.includes(slot);
+    }
+
+    async function syncThemeToDevice() {
+      if (!isConnected) return;
+      if (selectedThemeIdx !== CUSTOM_IDX) {
+        currentThemeId = selectedThemeIdx;
+        await queueCommand(`SETTHEME:${selectedThemeIdx}`);
+      } else {
+        currentThemeId = 255;
+        await queueCommand(`SETCOLORS:${workingTheme.join(',')}`);
+      }
+      appliedTheme = [...workingTheme];
+    }
+
+    async function syncButtonColorsToDevice(btnIdx) {
+      if (!isConnected || btnIdx === null || btnIdx < 0 || btnIdx >= 16) return;
+      const vals = workingBtnColors[btnIdx] ? workingBtnColors[btnIdx] : [0,0,0,0,0,0];
+      await queueCommand(`BTNCOLOR:${btnIdx}:${vals.join(',')}`);
+      appliedBtnColors[btnIdx] = workingBtnColors[btnIdx] ? [...workingBtnColors[btnIdx]] : null;
+      btnColorDirty = false;
+    }
+
+    function rgb565ToHex(v) {
+      const r=((v>>11)&0x1F)<<3, g=((v>>5)&0x3F)<<2, b=(v&0x1F)<<3;
+      return '#'+[r,g,b].map(c=>c.toString(16).padStart(2,'0')).join('');
+    }
+    function hexToRgb565(hex) {
+      const r=parseInt(hex.slice(1,3),16), g=parseInt(hex.slice(3,5),16), b=parseInt(hex.slice(5,7),16);
+      return ((r>>3)<<11)|((g>>2)<<5)|(b>>3);
+    }
+
+    // Preset themes: 9 values [bg, hdr, cardOff, cardOn, bordOff, bordOn, numDim, txOn, txOff]
+    const presetThemes = [
+      {name:'Beige',    c:[0xCDD3,0x7B49,0xDE97,0xBD0E,0x9C4D,0x8B42,0xA490,0x3963,0x9C4D]},
+      {name:'Dark',     c:[0x0863,0x08C5,0x10C5,0x0928,0x3A4E,0x06BF,0x4228,0xFFFF,0x3A4E]},
+      {name:'Mono',     c:[0x0000,0x2104,0x1082,0x2104,0x7BEF,0xFFFF,0x5AEB,0xFFFF,0x7BEF]},
+      {name:'Ocean',    c:[0x0208,0x0410,0x0208,0x0430,0x2D7F,0x07FF,0x3A4E,0xFFFF,0x2D7F]},
+      {name:'Forest',   c:[0x0260,0x2320,0x0260,0x03A0,0x3CC5,0x07E0,0x4C85,0xFFFF,0x3CC5]},
+      {name:'Rose',     c:[0xF71B,0x8808,0xF6BA,0xD34E,0xB24B,0xD8CD,0xB38E,0x3906,0xB24B]},
+      {name:'Sunset',   c:[0xFDA0,0x8200,0xFE20,0xDC40,0xB420,0xFA00,0xCC40,0x3000,0xB420]},
+      {name:'Lavender', c:[0x1084,0x2889,0x1084,0x308C,0x5190,0x897F,0x4A8C,0xFFFF,0x5190]},
+      {name:'Slate',    c:[0x1082,0x2124,0x18C3,0x2965,0x4208,0x6B4D,0x4A49,0xC618,0x4208]},
+      {name:'Amber',    c:[0xFED4,0x9300,0xFEB2,0xDD00,0xAB60,0xC3A0,0xAB80,0x3000,0xAB60]},
+      {name:'Mint',     c:[0x0400,0x0240,0x0420,0x0560,0x2D24,0x47E9,0x3C85,0xFFFF,0x2D24]},
+      {name:'Stone',    c:[0xC65A,0x630C,0xDEDB,0xAD75,0x8C51,0x6B4D,0x9492,0x3186,0x8C51]},
+      {name:'Cherry',   c:[0x1083,0x4808,0x1083,0x4008,0x8810,0xF800,0x5808,0xFFFF,0x8810]},
+      {name:'Cloud',    c:[0xE73C,0x8C71,0xF79E,0xCE59,0xAD55,0x7BCF,0xAD55,0x2104,0xAD55]},
+      {name:'Midnight', c:[0x0000,0x0000,0x0841,0x18E3,0x4A49,0xFDA0,0x39C7,0xFFFF,0x4A49]},
+    ];
+    let customColors = [...presetThemes[2].c];
+    const CUSTOM_IDX = 99;
+    let selectedThemeIdx = 0;
+    const universalPalette = [
+      '#E74C3C','#E91E63','#FF5722','#FF9800','#FFC107','#FFEB3B',
+      '#8BC34A','#4CAF50','#009688','#00BCD4','#2196F3','#3F51B5',
+      '#673AB7','#9C27B0','#795548','#607D8B','#FFFFFF','#000000',
+    ];
+    let recentColors = [];
+    let paletteTarget = null; // {type:'theme',slot} or {type:'btn',slot}
+
+    // ── Grid display mirroring ──
+    function refreshGridDisplay() {
+      const grid = document.getElementById('key-grid');
+      grid.style.background = rgb565ToHex(workingTheme[0]);
+      for (let i = 0; i < 16; i++) updateKeyBtn(i);
+    }
+
+    function updateKeyBtn(index) {
+      const b = document.getElementById('key-grid').children[index];
+      if (!b) return;
+      const hasMacro = buttonShortcuts[index]?.length > 0;
+      const name = buttonNames[index]?.trim();
+      const bc = workingBtnColors[index];
+      const t = workingTheme;
+      const isCustom = (selectedThemeIdx === CUSTOM_IDX);
+      let fill, border, text;
+      if (hasMacro) {
+        fill   = (isCustom && bc && bc[1]) ? bc[1] : t[3];
+        border = (isCustom && bc && bc[3]) ? bc[3] : t[5];
+        text   = (isCustom && bc && bc[4]) ? bc[4] : t[7];
+      } else {
+        fill   = (isCustom && bc && bc[0]) ? bc[0] : t[2];
+        border = (isCustom && bc && bc[2]) ? bc[2] : t[4];
+        text   = (isCustom && bc && bc[5]) ? bc[5] : t[8];
+      }
+      b.style.background = rgb565ToHex(fill);
+      b.style.borderColor = rgb565ToHex(border);
+      b.classList.toggle('selected', index === selectedButton);
+      const numEl = b.querySelector('.key-num');
+      const nameEl = b.querySelector('.key-name');
+      if (numEl) numEl.style.color = rgb565ToHex(t[6]);
+      if (nameEl) {
+        nameEl.style.color = rgb565ToHex(text);
+        let display;
+        if (!name) display = hasMacro ? 'SET' : 'EMPTY';
+        else { const l1=name.substring(0,8).trimEnd(), l2=name.substring(8,16).trimEnd(); display=l2?l1+'<br>'+l2:l1; }
+        nameEl.innerHTML = display;
+      }
+    }
+
+    function initThemeGrid() {
+      const grid = document.getElementById('theme-grid');
+      grid.innerHTML = '';
+      presetThemes.forEach((t, i) => grid.appendChild(makeThemeSwatch(t.name, t.c, i)));
+      grid.appendChild(makeThemeSwatch('Custom', customColors, CUSTOM_IDX));
+      updateThemeSelection();
+    }
+
+    function makeThemeSwatch(name, colors, idx) {
+      const sw = document.createElement('div');
+      sw.className = 'theme-swatch'; sw.dataset.themeIdx = idx;
+      sw.innerHTML = `<div class="theme-swatch-inner" style="background:${rgb565ToHex(colors[0])}">
+        <div class="theme-swatch-cell" style="background:${rgb565ToHex(colors[2])};border:1px solid ${rgb565ToHex(colors[4])}"></div>
+        <div class="theme-swatch-cell" style="background:${rgb565ToHex(colors[3])};border:1px solid ${rgb565ToHex(colors[5])}"></div>
+        <div class="theme-swatch-cell" style="background:${rgb565ToHex(colors[3])};border:1px solid ${rgb565ToHex(colors[5])}"></div>
+        <div class="theme-swatch-cell" style="background:${rgb565ToHex(colors[2])};border:1px solid ${rgb565ToHex(colors[4])}"></div>
+      </div><div class="theme-swatch-name">${name}</div>`;
+      sw.addEventListener('click', () => selectTheme(idx));
+      return sw;
+    }
+
+    function selectTheme(idx) {
+      selectedThemeIdx = idx;
+      currentThemeId = (idx === CUSTOM_IDX) ? 255 : idx;
+      if (idx === CUSTOM_IDX) {
+        workingTheme = [...customColors];
+        document.getElementById('custom-controls').classList.remove('hidden');
+        syncSwatches();
+      } else {
+        workingTheme = [...presetThemes[idx].c];
+        document.getElementById('custom-controls').classList.add('hidden');
+      }
+      updateThemeSelection();
+      updateBtnColorSection();
+      refreshGridDisplay();
+      syncThemeToDevice();
+    }
+
+    function updateThemeSelection() {
+      document.querySelectorAll('.theme-swatch').forEach(sw => {
+        sw.classList.toggle('active', parseInt(sw.dataset.themeIdx) === selectedThemeIdx);
+      });
+    }
+
+    function syncSwatches() {
+      document.querySelectorAll('#custom-controls .color-swatch').forEach(sw => {
+        const [,slot] = sw.dataset.target.split(':');
+        sw.style.background = rgb565ToHex(workingTheme[parseInt(slot)]);
+      });
+    }
+
+    function updateBtnColorSection() {
+      const section = document.getElementById('btn-color-controls');
+      if (selectedThemeIdx === CUSTOM_IDX && selectedButton !== null) {
+        section.style.display = '';
+        syncBtnSwatches();
+      } else { section.style.display = 'none'; }
+    }
+
+    function syncBtnSwatches() {
+      if (selectedButton === null) return;
+      const bc = workingBtnColors[selectedButton];
+      const t = workingTheme;
+      const defaults = [t[2],t[3],t[4],t[5],t[7],t[8]];
+      document.querySelectorAll('#btn-color-controls .color-swatch').forEach(sw => {
+        const [,slot] = sw.dataset.target.split(':');
+        const s = parseInt(slot);
+        sw.style.background = rgb565ToHex((bc && bc[s]) ? bc[s] : defaults[s]);
+      });
+    }
+
+    // ── Shared palette popover ──
+    function initPaletteGrid() {
+      const grid = document.getElementById('palette-grid');
+      grid.innerHTML = '';
+      universalPalette.forEach(hex => {
+        const sw = document.createElement('div');
+        sw.className = 'palette-swatch'; sw.style.background = hex; sw.dataset.color = hex;
+        sw.addEventListener('click', () => pickColor(hex));
+        grid.appendChild(sw);
+      });
+    }
+
+    function renderRecentColors() {
+      const c = document.getElementById('recent-colors'); c.innerHTML = '';
+      recentColors.forEach(hex => {
+        const sw = document.createElement('div');
+        sw.className = 'palette-swatch'; sw.style.background = hex;
+        sw.style.width='28px'; sw.style.height='28px';
+        sw.addEventListener('click', () => pickColor(hex));
+        c.appendChild(sw);
+      });
+    }
+
+    function showPalette(anchor, target) {
+      paletteTarget = target;
+      const pop = document.getElementById('color-palette-popover');
+      pop.classList.remove('hidden');
+      const r = anchor.getBoundingClientRect();
+      let left = r.right + 6, top = r.top;
+      if (left + 220 > window.innerWidth) left = r.left - 220;
+      if (top + 320 > window.innerHeight) top = window.innerHeight - 325;
+      pop.style.left = left+'px'; pop.style.top = top+'px';
+      renderRecentColors();
+    }
+
+    function hidePalette() {
+      document.getElementById('color-palette-popover').classList.add('hidden');
+      paletteTarget = null;
+    }
+
+    function pickColor(hex) {
+      if (!paletteTarget) return;
+      const v = hexToRgb565(hex);
+      let shouldRefreshPreview = true;
+      if (paletteTarget.type === 'theme') {
+        workingTheme[paletteTarget.slot] = v;
+        if (selectedThemeIdx === CUSTOM_IDX) customColors = [...workingTheme];
+        syncSwatches();
+        // Update custom swatch preview
+        const swEl = document.querySelector(`.theme-swatch[data-theme-idx="${CUSTOM_IDX}"]`);
+        if (swEl) {
+          swEl.querySelector('.theme-swatch-inner').style.background = rgb565ToHex(workingTheme[0]);
+          const cells = swEl.querySelectorAll('.theme-swatch-cell');
+          cells[0].style.background = rgb565ToHex(workingTheme[2]);
+          cells[1].style.background = rgb565ToHex(workingTheme[3]);
+          cells[2].style.background = rgb565ToHex(workingTheme[3]);
+          cells[3].style.background = rgb565ToHex(workingTheme[2]);
+        }
+        syncThemeToDevice();
+      } else if (paletteTarget.type === 'btn' && selectedButton !== null) {
+        if (!workingBtnColors[selectedButton]) workingBtnColors[selectedButton] = [0,0,0,0,0,0];
+        workingBtnColors[selectedButton][paletteTarget.slot] = v;
+        btnColorDirty = true;
+        syncBtnSwatches();
+        shouldRefreshPreview = btnColorSlotAffectsCurrentDisplay(selectedButton, paletteTarget.slot);
+        syncButtonColorsToDevice(selectedButton);
+      }
+      if (!universalPalette.map(c=>c.toUpperCase()).includes(hex.toUpperCase())) {
+        recentColors = recentColors.filter(c=>c.toUpperCase()!==hex.toUpperCase());
+        recentColors.unshift(hex.toUpperCase());
+        if (recentColors.length > 12) recentColors.pop();
+      }
+      if (shouldRefreshPreview) refreshGridDisplay();
+      hidePalette();
+    }
+
+    // Click any .color-swatch to open palette
+    document.addEventListener('click', e => {
+      const sw = e.target.closest('.color-swatch');
+      if (sw && sw.dataset.target) {
+        e.stopPropagation();
+        const [type, slot] = sw.dataset.target.split(':');
+        showPalette(sw, {type, slot:parseInt(slot)});
+        return;
+      }
+      if (!e.target.closest('#color-palette-popover')) hidePalette();
+    });
+
+    document.getElementById('palette-custom-picker').addEventListener('input', function() {
+      pickColor(this.value);
+    });
+
+    document.getElementById('btn-color-reset-all').addEventListener('click', async () => {
+      if (selectedButton === null) return;
+      workingBtnColors[selectedButton] = null;
+      appliedBtnColors[selectedButton] = null;
+      if (isConnected) await syncButtonColorsToDevice(selectedButton);
+      syncBtnSwatches();
+      refreshGridDisplay();
+      log(`Reset colors for Button ${selectedButton+1}`, 'info');
+    });
+
+    // ── Responses ──
+    function parseThemeResponse(data) {
+      const parts = data.split(',');
+      if (parts.length < 10) return;
+      currentThemeId = parseInt(parts[0]);
+      const colors = []; for (let i=1;i<=9;i++) colors.push(parseInt(parts[i]));
+      if (currentThemeId !== 255 && currentThemeId < presetThemes.length) selectedThemeIdx = currentThemeId;
+      else { selectedThemeIdx = CUSTOM_IDX; customColors = [...colors]; }
+      workingTheme = [...colors]; appliedTheme = [...colors];
+      updateThemeSelection();
+      document.getElementById('custom-controls').classList.toggle('hidden', selectedThemeIdx !== CUSTOM_IDX);
+      if (selectedThemeIdx === CUSTOM_IDX) syncSwatches();
+      updateBtnColorSection();
+      refreshGridDisplay();
+    }
+
+    function parseBtnColorResponse(data) {
+      const c1 = data.indexOf(':');
+      if (c1 === -1) return;
+      const idx = parseInt(data.substring(0, c1));
+      const vals = data.substring(c1+1).split(',').map(Number);
+      if (idx >= 0 && idx < 16 && vals.length >= 6) {
+        const hasAny = vals.some(v => v !== 0);
+        workingBtnColors[idx] = hasAny ? [...vals] : null;
+        appliedBtnColors[idx] = hasAny ? [...vals] : null;
+      }
+    }
+
+    // ── Button selection hook ──
+    const _origSelectBtn = selectButton;
+    selectButton = function(index) {
+      if (reorderMode) return; // block selection during reorder
+      _origSelectBtn(index);
+      updateBtnColorSection();
+    };
+
+    // ── Drag-and-drop (toggle mode) ──
+    let reorderMode = false, dragSrcIdx = null, dragGhost = null;
+
+    function enterReorderMode() {
+      reorderMode = true;
+      const btn = document.getElementById('reorder-btn');
+      const grid = document.getElementById('key-grid');
+      btn.textContent = 'Done'; btn.className = 'btn btn-success';
+      btn.style.flex='1'; btn.style.justifyContent='center';
+      grid.classList.add('reorder-mode');
+      // Hide editor/right sidebar, show reorder message
+      document.getElementById('editor-empty').style.display = 'none';
+      document.getElementById('editor-content').classList.add('hidden');
+      document.getElementById('reorder-overlay').style.display = '';
+      document.querySelector('.display-sidebar').style.opacity = '0.3';
+      document.querySelector('.display-sidebar').style.pointerEvents = 'none';
+    }
+
+    function exitReorderMode() {
+      reorderMode = false;
+      const btn = document.getElementById('reorder-btn');
+      const grid = document.getElementById('key-grid');
+      btn.textContent = 'Reorder'; btn.className = 'btn btn-ghost';
+      btn.style.flex='1'; btn.style.justifyContent='center';
+      grid.classList.remove('reorder-mode');
+      // Restore editor and right sidebar
+      document.getElementById('reorder-overlay').style.display = 'none';
+      document.querySelector('.display-sidebar').style.opacity = '';
+      document.querySelector('.display-sidebar').style.pointerEvents = '';
+      if (selectedButton !== null) {
+        document.getElementById('editor-content').classList.remove('hidden');
+      } else {
+        document.getElementById('editor-empty').style.display = '';
+      }
+    }
+
+    document.getElementById('reorder-btn').addEventListener('click', () => {
+      if (!isConnected) return;
+      if (reorderMode) exitReorderMode(); else enterReorderMode();
+    });
+
+    document.getElementById('key-grid').addEventListener('mousedown', e => {
+      if (!reorderMode || !isConnected) return;
+      const btn = e.target.closest('.key-btn');
+      if (!btn) return;
+      e.preventDefault();
+      const idx = parseInt(btn.dataset.index);
+      dragSrcIdx = idx;
+      const rect = btn.getBoundingClientRect();
+      dragGhost = document.createElement('div');
+      dragGhost.className = 'drag-ghost';
+      dragGhost.style.width=rect.width+'px'; dragGhost.style.height=rect.height+'px';
+      dragGhost.innerHTML = btn.innerHTML;
+      dragGhost.style.left=(e.clientX-rect.width/2)+'px';
+      dragGhost.style.top=(e.clientY-rect.height/2)+'px';
+      document.body.appendChild(dragGhost);
+      btn.classList.add('dragging');
+      const onMove = ev => {
+        if (!dragGhost) return;
+        dragGhost.style.left=(ev.clientX-rect.width/2)+'px';
+        dragGhost.style.top=(ev.clientY-rect.height/2)+'px';
+        document.querySelectorAll('.key-btn').forEach(b=>b.classList.remove('drag-over'));
+        const hovered = document.elementFromPoint(ev.clientX,ev.clientY)?.closest('.key-btn');
+        if (hovered && parseInt(hovered.dataset.index)!==dragSrcIdx) hovered.classList.add('drag-over');
+      };
+      const onUp = ev => {
+        document.removeEventListener('mousemove',onMove);
+        document.removeEventListener('mouseup',onUp);
+        if (dragGhost){dragGhost.remove();dragGhost=null;}
+        document.querySelectorAll('.key-btn').forEach(b=>{b.classList.remove('dragging');b.classList.remove('drag-over');});
+        if (dragSrcIdx===null) return;
+        const target = document.elementFromPoint(ev.clientX,ev.clientY)?.closest('.key-btn');
+        if (target){const ti=parseInt(target.dataset.index); if(ti!==dragSrcIdx) performSwap(dragSrcIdx,ti);}
+        dragSrcIdx=null;
+      };
+      document.addEventListener('mousemove',onMove);
+      document.addEventListener('mouseup',onUp);
+    });
+
+    async function performSwap(a, b) {
+      [buttonShortcuts[a],buttonShortcuts[b]]=[buttonShortcuts[b],buttonShortcuts[a]];
+      [buttonNames[a],buttonNames[b]]=[buttonNames[b],buttonNames[a]];
+      [workingBtnColors[a],workingBtnColors[b]]=[workingBtnColors[b],workingBtnColors[a]];
+      [appliedBtnColors[a],appliedBtnColors[b]]=[appliedBtnColors[b],appliedBtnColors[a]];
+      updateKeyBtn(a); updateKeyBtn(b);
+      if(selectedButton===a||selectedButton===b){
+        commandSteps=[...(buttonShortcuts[selectedButton]||[])];
+        renderSteps();setDisplayName(buttonNames[selectedButton]||'');
+        updateToolbar();updateBtnColorSection();
+      }
+      if(isConnected){await sendCommand(`SWAP:${a},${b}`);log(`Swapped ${a+1} ↔ ${b+1}`,'info');}
+    }
+
+    // ── Init ──
+    initThemeGrid();
+    initPaletteGrid();
+    refreshGridDisplay();
+
+    // ── end of new theme/color system ──
+
 
   </script>
 </body>
