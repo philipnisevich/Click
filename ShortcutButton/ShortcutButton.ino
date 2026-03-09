@@ -392,16 +392,20 @@ bool showButtonNumbers = true;
 #define DISPLAY_HEIGHT 320
 
 // Grid layout constants
-#define HEADER_H    27    // header bar height (26px bar + 1px rule line)
 #define BTN_SIZE    54    // square button side length
 #define BTN_RADIUS   7    // corner radius for rounded buttons
 #define H_GAP        4    // horizontal gap between buttons
 #define V_GAP        4    // vertical gap between buttons
-// Auto-derived margins (centered grid):
-//   H_MARGIN = (240 - 4*54 - 3*4) / 2 = 6
-//   V_MARGIN = (320 - 27 - 4*54 - 3*4) / 2 = 32
-#define H_MARGIN    ((DISPLAY_WIDTH  - 4*BTN_SIZE - 3*H_GAP) / 2)
-#define V_MARGIN    ((DISPLAY_HEIGHT - HEADER_H - 4*BTN_SIZE - 3*V_GAP) / 2)
+#define GRID_W      (4*BTN_SIZE + 3*H_GAP)
+#define GRID_H      (4*BTN_SIZE + 3*V_GAP)
+#define GRID_X      ((DISPLAY_WIDTH  - GRID_W) / 2)
+#define GRID_Y      ((DISPLAY_HEIGHT - GRID_H) / 2)
+
+// BLE status icon area (top-right only, no header bar)
+#define STATUS_X    222
+#define STATUS_Y    6
+#define STATUS_W    18
+#define STATUS_H    12
 
 // Minimal 5x7 font (ASCII 32-90, stored in PROGMEM)
 const PROGMEM uint8_t font5x7[] = {
@@ -916,7 +920,7 @@ void loop() {
   handleSerial();
   scanMatrix();
 
-  // Update BLE status in the display header whenever connection state changes.
+  // Update BLE status icon whenever connection state changes.
   if (bleDisplayNeedsUpdate) {
     updateBleStatusDisplay();
   }
@@ -1462,8 +1466,8 @@ void loadAllNames() {
 void updateBleStatusDisplay() {
   bleDisplayNeedsUpdate = false;
   // Clear signal icon area and redraw with current state color.
-  tftFillRect(222, 0, 18, HEADER_H - 1, HDR_BG);
-  drawSignalIcon(224, 10, bleConnected ? GREEN : SIG_ADV);
+  tftFillRect(STATUS_X, STATUS_Y, STATUS_W, STATUS_H, BGDARK);
+  drawSignalIcon(STATUS_X + 2, STATUS_Y + 2, bleConnected ? GREEN : SIG_ADV);
 }
 
 // Draws a single button tile at its grid position.
@@ -1471,8 +1475,8 @@ void updateBleStatusDisplay() {
 void drawSingleButton(int btnIdx) {
   int col = btnIdx % 4;
   int row = btnIdx / 4;
-  int x = H_MARGIN + col * (BTN_SIZE + H_GAP);
-  int y = HEADER_H + V_MARGIN + row * (BTN_SIZE + V_GAP);
+  int x = GRID_X + col * (BTN_SIZE + H_GAP);
+  int y = GRID_Y + row * (BTN_SIZE + V_GAP);
 
   // Clear bounding box with background so rounded corners are clean.
   tftFillRect(x, y, BTN_SIZE, BTN_SIZE, BGDARK);
@@ -1531,15 +1535,9 @@ void drawSingleButton(int btnIdx) {
 void drawButtonGrid() {
   tftFillRect(0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT, BGDARK);
 
-  // Header bar (26px) + 1px accent rule line.
-  tftFillRect(0, 0, DISPLAY_WIDTH, HEADER_H - 1, HDR_BG);
-  tftFillRect(0, HEADER_H - 1, DISPLAY_WIDTH, 1, BORD_ON);
-
-  // "SHORTCUTS" centered at 2x scale (9 chars × 12px = 106px wide, 14px tall).
-  tftPrintF2x((DISPLAY_WIDTH - 106) / 2, (HEADER_H - 1 - 14) / 2, F("SHORTCUTS"), WHITE);
-
-  // Signal icon (right side) — green=connected, amber=advertising.
-  drawSignalIcon(224, 10, bleConnected ? GREEN : SIG_ADV);
+  // Signal icon only (top-right) — green=connected, amber=advertising.
+  tftFillRect(STATUS_X, STATUS_Y, STATUS_W, STATUS_H, BGDARK);
+  drawSignalIcon(STATUS_X + 2, STATUS_Y + 2, bleConnected ? GREEN : SIG_ADV);
 
   for (int i = 0; i < NUM_BUTTONS; i++) {
     drawSingleButton(i);
