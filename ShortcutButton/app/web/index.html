@@ -1765,6 +1765,13 @@
         workingBtnColors[idx] = hasAny ? [...vals] : null;
         appliedBtnColors[idx] = hasAny ? [...vals] : null;
         rebuildRecentColorsFromMatrix();
+        if (selectedThemeIdx === CUSTOM_IDX) {
+          updateKeyBtn(idx);
+          if (idx === selectedButton) {
+            syncBtnSwatches();
+            updateBtnColorSection();
+          }
+        }
       }
     }
 
