@@ -339,13 +339,65 @@ void setupBleKeyboard() {
 #define LIGHTGRAY  0xC618
 #define GREEN      0x07E0
 #define CYAN       0x07FF
-#define SOFTCYAN   0x2D7F
-#define TEAL       0x0410
-#define BGDARK     0x0208
+// Dynamic theme colors (loaded from NVS or set via serial)
+// Index: 0=bg, 1=hdr, 2=cardOff, 3=cardOn, 4=bordOff, 5=bordOn, 6=numDim, 7=txOn, 8=txOff
+#define THEME_SLOTS 9
+uint16_t themeColor[THEME_SLOTS] = {
+  0xCDD3, 0x7B49, 0xDE97, 0xBD0E, 0x9C4D, 0x8B42, 0xA490, 0x3963, 0x9C4D
+};
+// Convenience accessors
+#define BGDARK     themeColor[0]
+#define HDR_BG     themeColor[1]
+#define CARD_OFF   themeColor[2]
+#define CARD_ON    themeColor[3]
+#define BORD_OFF   themeColor[4]
+#define BORD_ON    themeColor[5]
+#define NUM_DIM    themeColor[6]
+#define TXON       themeColor[7]   // text on active buttons
+#define TXOFF      themeColor[8]   // text on empty buttons
+#define SIG_ADV    0xDD24
+
+// Per-button custom colors (0 = use theme default)
+// Each button: [0]=cardOff, [1]=cardOn, [2]=bordOff, [3]=bordOn, [4]=txOn, [5]=txOff
+#define BTN_COLOR_SLOTS 6
+uint16_t btnCustom[16][BTN_COLOR_SLOTS] = {{0}};
+
+// Preset themes (PROGMEM): {bg, hdr, cardOff, cardOn, bordOff, bordOn, numDim, txOn, txOff}
+const PROGMEM uint16_t presetThemes[][THEME_SLOTS] = {
+  {0xCDD3,0x7B49,0xDE97,0xBD0E,0x9C4D,0x8B42,0xA490,0x3963,0x9C4D}, //  0: Beige
+  {0x0863,0x08C5,0x10C5,0x0928,0x3A4E,0x06BF,0x4228,0xFFFF,0x3A4E}, //  1: Dark
+  {0x0000,0x2104,0x1082,0x2104,0x7BEF,0xFFFF,0x5AEB,0xFFFF,0x7BEF}, //  2: Mono
+  {0x0208,0x0410,0x0208,0x0430,0x2D7F,0x07FF,0x3A4E,0xFFFF,0x2D7F}, //  3: Ocean
+  {0x0260,0x2320,0x0260,0x03A0,0x3CC5,0x07E0,0x4C85,0xFFFF,0x3CC5}, //  4: Forest
+  {0xF71B,0x8808,0xF6BA,0xD34E,0xB24B,0xD8CD,0xB38E,0x3906,0xB24B}, //  5: Rose
+  {0xFDA0,0x8200,0xFE20,0xDC40,0xB420,0xFA00,0xCC40,0x3000,0xB420}, //  6: Sunset
+  {0x1084,0x2889,0x1084,0x308C,0x5190,0x897F,0x4A8C,0xFFFF,0x5190}, //  7: Lavender
+  {0x1082,0x2124,0x18C3,0x2965,0x4208,0x6B4D,0x4A49,0xC618,0x4208}, //  8: Slate
+  {0xFED4,0x9300,0xFEB2,0xDD00,0xAB60,0xC3A0,0xAB80,0x3000,0xAB60}, //  9: Amber
+  {0x0400,0x0240,0x0420,0x0560,0x2D24,0x47E9,0x3C85,0xFFFF,0x2D24}, // 10: Mint
+  {0xC65A,0x630C,0xDEDB,0xAD75,0x8C51,0x6B4D,0x9492,0x3186,0x8C51}, // 11: Stone
+  {0x1083,0x4808,0x1083,0x4008,0x8810,0xF800,0x5808,0xFFFF,0x8810}, // 12: Cherry
+  {0xE73C,0x8C71,0xF79E,0xCE59,0xAD55,0x7BCF,0xAD55,0x2104,0xAD55}, // 13: Cloud
+  {0x0000,0x0000,0x0841,0x18E3,0x4A49,0xFDA0,0x39C7,0xFFFF,0x4A49}, // 14: Midnight
+};
+#define NUM_PRESETS 15
+uint8_t currentThemeId = 0; // 0-14 = preset, 255 = custom
 
 // Display dimensions
 #define DISPLAY_WIDTH  240
 #define DISPLAY_HEIGHT 320
+
+// Grid layout constants
+#define HEADER_H    27    // header bar height (26px bar + 1px rule line)
+#define BTN_SIZE    54    // square button side length
+#define BTN_RADIUS   7    // corner radius for rounded buttons
+#define H_GAP        4    // horizontal gap between buttons
+#define V_GAP        4    // vertical gap between buttons
+// Auto-derived margins (centered grid):
+//   H_MARGIN = (240 - 4*54 - 3*4) / 2 = 6
+//   V_MARGIN = (320 - 27 - 4*54 - 3*4) / 2 = 32
+#define H_MARGIN    ((DISPLAY_WIDTH  - 4*BTN_SIZE - 3*H_GAP) / 2)
+#define V_MARGIN    ((DISPLAY_HEIGHT - HEADER_H - 4*BTN_SIZE - 3*V_GAP) / 2)
 
 // Minimal 5x7 font (ASCII 32-90, stored in PROGMEM)
 const PROGMEM uint8_t font5x7[] = {
@@ -451,7 +503,7 @@ void tftInit() {
   tftCmd(0x11); delay(120);  // Sleep out
 
   tftCmd(0x3A); tftData(0x55);  // 16-bit color (RGB565)
-  tftCmd(0x36); tftData(0x00);  // Memory access: normal orientation
+  tftCmd(0x36); tftData(0xC0);  // Memory access: 180° rotation (MY+MX)
   tftCmd(0x21);                 // Display inversion on (needed for many ST7789 displays)
   tftCmd(0x13);                 // Normal display mode
   tftCmd(0x29); delay(50);      // Display on
@@ -489,6 +541,23 @@ void tftDrawRect(uint16_t x, uint16_t y, uint16_t w, uint16_t h, uint16_t color)
   tftFillRect(x + w - 1, y, 1, h, color);
 }
 
+// Filled rounded rectangle using row-scan with integer sqrt at corners.
+// sqrtf is called only for the 2*r corner rows, so it's fast in practice.
+void tftFillRoundRect(int16_t x, int16_t y, int16_t w, int16_t h, int16_t r, uint16_t color) {
+  for (int16_t i = 0; i < h; i++) {
+    int16_t xo = 0;
+    if (i < r) {
+      int16_t dy = r - 1 - i;
+      xo = r - (int16_t)(sqrtf((float)(r * r - dy * dy)) + 0.5f);
+    } else if (i >= h - r) {
+      int16_t dy = i - (h - r);
+      xo = r - (int16_t)(sqrtf((float)(r * r - dy * dy)) + 0.5f);
+    }
+    if (w - 2 * xo > 0)
+      tftFillRect(x + xo, y + i, w - 2 * xo, 1, color);
+  }
+}
+
 void tftDrawChar(uint16_t x, uint16_t y, char c, uint16_t color) {
   if (c < 32 || c > 90) c = ' ';
   const uint8_t* glyph = font5x7 + (c - 32) * 5;
@@ -518,6 +587,36 @@ void tftPrintF(uint16_t x, uint16_t y, const __FlashStringHelper* str, uint16_t 
     tftDrawChar(x, y, c, color);
     x += 6;
   }
+}
+
+// 2x scaled character (10x14 pixels) for header title.
+void tftDrawChar2x(uint16_t x, uint16_t y, char c, uint16_t color) {
+  if (c < 32 || c > 90) c = ' ';
+  const uint8_t* glyph = font5x7 + (c - 32) * 5;
+  for (uint8_t col = 0; col < 5; col++) {
+    uint8_t line = pgm_read_byte(glyph + col);
+    for (uint8_t row = 0; row < 7; row++) {
+      if (line & (1 << row))
+        tftFillRect(x + col * 2, y + row * 2, 2, 2, color);
+    }
+  }
+}
+
+void tftPrintF2x(uint16_t x, uint16_t y, const __FlashStringHelper* str, uint16_t color) {
+  const char* p = (const char*)str;
+  while (char c = pgm_read_byte(p++)) {
+    if (c >= 'a' && c <= 'z') c -= 32;
+    tftDrawChar2x(x, y, c, color);
+    x += 12;  // 10px char + 2px spacing at 2x scale
+  }
+}
+
+// 3-bar signal strength icon (8x7 pixels).
+// Represents BLE connectivity — color indicates state.
+void drawSignalIcon(uint16_t x, uint16_t y, uint16_t color) {
+  tftFillRect(x,     y + 4, 2, 3, color);  // short bar
+  tftFillRect(x + 3, y + 2, 2, 5, color);  // medium bar
+  tftFillRect(x + 6, y,     2, 7, color);  // tall bar
 }
 
 // Matrix configuration
@@ -736,8 +835,23 @@ void setup() {
 
   // Initialize display first — SPI only, no conflict with BLE or USB.
   tftInit();
-  tftFillRect(0, 0, 240, 320, BLACK);
-  tftPrintF(10, 10, F("STARTING BLE..."), WHITE);
+
+  // Open storage early so we can load the theme for the splash screen.
+  storageReady = prefs.begin("shortcuts", false);
+  if (storageReady) {
+    loadThemeFromNVS();
+  }
+
+  // Splash screen: theme background + centered "SHORTCUTBUTTON" at 2x scale.
+  // Determine text color from background brightness.
+  {
+    uint16_t bgR = (BGDARK >> 11) & 0x1F;
+    uint16_t bgG = (BGDARK >> 5)  & 0x3F;
+    uint16_t splashTxt = (bgR * 8 + bgG * 4 > 300) ? BLACK : WHITE;
+    tftFillRect(0, 0, 240, 320, BGDARK);
+    // "SHORTCUTBUTTON" = 14 chars × 12px = 166px wide at 2x, 14px tall
+    tftPrintF2x((DISPLAY_WIDTH - 166) / 2, (DISPLAY_HEIGHT - 14) / 2, F("SHORTCUTBUTTON"), splashTxt);
+  }
 
   // Load BLE device name from NVS before BLE init so the right name advertises.
   {
@@ -749,8 +863,6 @@ void setup() {
   }
 
   // Init BLE stack (radio + services) but do NOT start advertising yet.
-  // Advertising starts at the end of setup() so the host can only connect
-  // to a fully-initialized device, preventing partial-state connections.
   setupBleKeyboard();
 
   // USB / Serial
@@ -759,14 +871,11 @@ void setup() {
   USB.begin();
 #endif
 
-  // Initialize on-board storage (NVS flash)
-  tftFillRect(0, 10, 240, 10, BLACK);
-  tftPrintF(10, 10, F("INITIALIZING..."), WHITE);
-  storageReady = prefs.begin("shortcuts", false);
-
+  // Load remaining data from NVS
   if (storageReady) {
     scanForShortcuts();
     loadAllNames();
+    loadAllBtnColorsFromNVS();
   }
 
   Serial.println(storageReady ? F("<READY>") : F("<READY_NOSD>"));
@@ -849,6 +958,106 @@ void scanMatrix() {
 
     digitalWrite(rowPins[r], HIGH);
   }
+}
+
+// ── Theme/color NVS helpers ──
+
+void saveThemeToNVS() {
+  Preferences dp;
+  if (!dp.begin("display", false)) return;
+  dp.putUChar("tid", currentThemeId);
+  if (currentThemeId == 255) {
+    dp.putBytes("cols", (uint8_t *)themeColor, THEME_SLOTS * 2);
+  }
+  dp.end();
+}
+
+void loadThemeFromNVS() {
+  Preferences dp;
+  if (!dp.begin("display", true)) return;
+  currentThemeId = dp.getUChar("tid", 0);
+  if (currentThemeId < NUM_PRESETS) {
+    for (int i = 0; i < THEME_SLOTS; i++)
+      themeColor[i] = pgm_read_word(&presetThemes[currentThemeId][i]);
+  } else if (currentThemeId == 255) {
+    size_t len = dp.getBytesLength("cols");
+    if (len == THEME_SLOTS * 2) {
+      dp.getBytes("cols", (uint8_t *)themeColor, THEME_SLOTS * 2);
+    }
+  }
+  dp.end();
+}
+
+void saveBtnColorToNVS(int idx) {
+  Preferences dp;
+  if (!dp.begin("display", false)) return;
+  char key[6];
+  snprintf(key, sizeof(key), "bc%02d", idx);
+  uint8_t buf[BTN_COLOR_SLOTS * 2];
+  for (int i = 0; i < BTN_COLOR_SLOTS; i++) {
+    buf[i*2]   = btnCustom[idx][i] >> 8;
+    buf[i*2+1] = btnCustom[idx][i] & 0xFF;
+  }
+  dp.putBytes(key, buf, sizeof(buf));
+  dp.end();
+}
+
+void loadAllBtnColorsFromNVS() {
+  Preferences dp;
+  if (!dp.begin("display", true)) return;
+  const size_t expected = BTN_COLOR_SLOTS * 2;
+  for (int i = 0; i < NUM_BUTTONS; i++) {
+    char key[6];
+    snprintf(key, sizeof(key), "bc%02d", i);
+    uint8_t buf[BTN_COLOR_SLOTS * 2];
+    size_t len = dp.getBytesLength(key);
+    if (len == expected && dp.getBytes(key, buf, expected) == expected) {
+      for (int j = 0; j < BTN_COLOR_SLOTS; j++)
+        btnCustom[i][j] = ((uint16_t)buf[j*2] << 8) | buf[j*2+1];
+    } else if (len == 4 && dp.getBytes(key, buf, 4) == 4) {
+      // Migrate old 4-byte format: border, fill → bordOn, cardOn
+      btnCustom[i][3] = ((uint16_t)buf[0] << 8) | buf[1]; // bordOn
+      btnCustom[i][1] = ((uint16_t)buf[2] << 8) | buf[3]; // cardOn
+    }
+  }
+  dp.end();
+}
+
+void swapButtons(int a, int b) {
+  // Swap NVS shortcut blobs
+  char keyA[8], keyB[8];
+  getStorageKey(a, keyA, sizeof(keyA));
+  getStorageKey(b, keyB, sizeof(keyB));
+
+  uint8_t blobA[SHORTCUT_BLOB_MAX], blobB[SHORTCUT_BLOB_MAX];
+  size_t lenA = prefs.getBytesLength(keyA);
+  size_t lenB = prefs.getBytesLength(keyB);
+  if (lenA > 0 && lenA <= SHORTCUT_BLOB_MAX) prefs.getBytes(keyA, blobA, lenA); else lenA = 0;
+  if (lenB > 0 && lenB <= SHORTCUT_BLOB_MAX) prefs.getBytes(keyB, blobB, lenB); else lenB = 0;
+
+  // Write swapped
+  if (lenB > 0) prefs.putBytes(keyA, blobB, lenB); else prefs.remove(keyA);
+  if (lenA > 0) prefs.putBytes(keyB, blobA, lenA); else prefs.remove(keyB);
+
+  // Swap RAM state
+  bool tmpHas = buttonHasShortcut[a];
+  buttonHasShortcut[a] = buttonHasShortcut[b];
+  buttonHasShortcut[b] = tmpHas;
+
+  char tmpName[MAX_NAME_LENGTH + 1];
+  strncpy(tmpName, buttonNames[a], MAX_NAME_LENGTH + 1);
+  strncpy(buttonNames[a], buttonNames[b], MAX_NAME_LENGTH + 1);
+  strncpy(buttonNames[b], tmpName, MAX_NAME_LENGTH + 1);
+
+  uint16_t tmpColor[BTN_COLOR_SLOTS];
+  memcpy(tmpColor, btnCustom[a], sizeof(tmpColor));
+  memcpy(btnCustom[a], btnCustom[b], sizeof(tmpColor));
+  memcpy(btnCustom[b], tmpColor, sizeof(tmpColor));
+  saveBtnColorToNVS(a);
+  saveBtnColorToNVS(b);
+
+  updateButtonDisplay(a);
+  updateButtonDisplay(b);
 }
 
 void handleSerial() {
@@ -955,6 +1164,95 @@ void processCommand(String cmd) {
   } else if (cmd == "CLEARBONDS") {
     NimBLEDevice::deleteAllBonds();
     Serial.println(F("<BONDS_CLEARED>"));
+  } else if (cmd.startsWith("SETTHEME:")) {
+    int id = cmd.substring(9).toInt();
+    if (id >= 0 && id < NUM_PRESETS) {
+      currentThemeId = id;
+      for (int i = 0; i < THEME_SLOTS; i++)
+        themeColor[i] = pgm_read_word(&presetThemes[id][i]);
+      saveThemeToNVS();
+      drawButtonGrid();
+      Serial.println(F("<THEME_SET>"));
+    } else {
+      Serial.println(F("<ERROR:BAD_THEME>"));
+    }
+  } else if (cmd.startsWith("SETCOLORS:")) {
+    // Format: SETCOLORS:bg,hdr,cardOff,cardOn,bordOff,bordOn,numDim,txtDark
+    String data = cmd.substring(10);
+    uint16_t cols[THEME_SLOTS];
+    int idx = 0;
+    int start = 0;
+    for (int i = 0; i <= (int)data.length() && idx < THEME_SLOTS; i++) {
+      if (i == (int)data.length() || data.charAt(i) == ',') {
+        cols[idx++] = (uint16_t)data.substring(start, i).toInt();
+        start = i + 1;
+      }
+    }
+    if (idx == THEME_SLOTS) {
+      currentThemeId = 255; // custom
+      for (int i = 0; i < THEME_SLOTS; i++) themeColor[i] = cols[i];
+      saveThemeToNVS();
+      drawButtonGrid();
+      Serial.println(F("<COLORS_SET>"));
+    } else {
+      Serial.println(F("<ERROR:BAD_COLORS>"));
+    }
+  } else if (cmd.startsWith("BTNCOLOR:")) {
+    // Format: BTNCOLOR:idx:cOff,cOn,bOff,bOn,tOn,tOff (6 values)
+    int c1 = cmd.indexOf(':', 9);
+    if (c1 != -1) {
+      int idx = cmd.substring(9, c1).toInt();
+      if (idx >= 0 && idx < NUM_BUTTONS) {
+        String vals = cmd.substring(c1 + 1);
+        uint16_t parsed[BTN_COLOR_SLOTS] = {0};
+        int vi = 0, vs = 0;
+        for (int i = 0; i <= (int)vals.length() && vi < BTN_COLOR_SLOTS; i++) {
+          if (i == (int)vals.length() || vals.charAt(i) == ',') {
+            parsed[vi++] = (uint16_t)vals.substring(vs, i).toInt();
+            vs = i + 1;
+          }
+        }
+        if (vi == BTN_COLOR_SLOTS) {
+          for (int i = 0; i < BTN_COLOR_SLOTS; i++) btnCustom[idx][i] = parsed[i];
+          saveBtnColorToNVS(idx);
+          updateButtonDisplay(idx);
+          Serial.println(F("<BTNCOLOR_SET>"));
+        }
+      }
+    }
+  } else if (cmd.startsWith("SWAP:")) {
+    int comma = cmd.indexOf(',', 5);
+    if (comma != -1) {
+      int a = cmd.substring(5, comma).toInt();
+      int b = cmd.substring(comma + 1).toInt();
+      if (a >= 0 && a < NUM_BUTTONS && b >= 0 && b < NUM_BUTTONS && a != b) {
+        swapButtons(a, b);
+        Serial.println(F("<SWAPPED>"));
+      }
+    }
+  } else if (cmd == "GETTHEME") {
+    Serial.print(F("<THEME:"));
+    Serial.print(currentThemeId);
+    for (int i = 0; i < THEME_SLOTS; i++) {
+      Serial.print(',');
+      Serial.print(themeColor[i]);
+    }
+    Serial.println(F(">"));
+    // Also send per-button colors (6 values each)
+    for (int i = 0; i < NUM_BUTTONS; i++) {
+      bool hasCustom = false;
+      for (int j = 0; j < BTN_COLOR_SLOTS; j++) if (btnCustom[i][j]) { hasCustom = true; break; }
+      if (hasCustom) {
+        Serial.print(F("<BTNCOLOR:"));
+        Serial.print(i);
+        Serial.print(':');
+        for (int j = 0; j < BTN_COLOR_SLOTS; j++) {
+          if (j) Serial.print(',');
+          Serial.print(btnCustom[i][j]);
+        }
+        Serial.println(F(">"));
+      }
+    }
   }
 }
 
@@ -1114,102 +1412,44 @@ void loadAllNames() {
 
 void updateBleStatusDisplay() {
   bleDisplayNeedsUpdate = false;
-  // Redraw just the right side of the header bar with current BLE state.
-  tftFillRect(172, 0, DISPLAY_WIDTH - 172, 22, TEAL);
-  if (bleConnected) {
-    tftPrintF(175, 8, F("BLE ON"), GREEN);
-  } else {
-    tftPrintF(172, 8, F("BLE ADV"), GRAY);
-  }
+  // Clear signal icon area and redraw with current state color.
+  tftFillRect(222, 0, 18, HEADER_H - 1, HDR_BG);
+  drawSignalIcon(224, 10, bleConnected ? GREEN : SIG_ADV);
 }
 
-void drawButtonGrid() {
-  tftFillRect(0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT, BGDARK);
-
-  tftFillRect(0, 0, DISPLAY_WIDTH, 22, TEAL);
-  tftPrintF(8, 8, F("SHORTCUTS"), WHITE);
-  // BLE status on the right side of the header
-  if (bleConnected) {
-    tftPrintF(175, 8, F("BLE ON"), GREEN);
-  } else {
-    tftPrintF(172, 8, F("BLE ADV"), GRAY);
-  }
-
-  int margin = 2;
-  int boxW = (DISPLAY_WIDTH - margin * 5) / 4;
-  int boxH = (DISPLAY_HEIGHT - 24 - margin * 5) / 4;
-
-  for (int row = 0; row < 4; row++) {
-    for (int col = 0; col < 4; col++) {
-      int btnIdx = row * 4 + col;
-      int x = margin + col * (boxW + margin);
-      int y = 24 + margin + row * (boxH + margin);
-
-      if (buttonHasShortcut[btnIdx]) {
-        tftFillRect(x, y, boxW, boxH, DARKGRAY);
-        tftDrawRect(x, y, boxW, boxH, SOFTCYAN);
-      } else {
-        tftFillRect(x, y, boxW, boxH, BLACK);
-        tftDrawRect(x, y, boxW, boxH, DARKGRAY);
-      }
-
-      char num[3];
-      if (btnIdx < 9) { num[0] = '0' + btnIdx + 1; num[1] = '\0'; }
-      else { num[0] = '1'; num[1] = '0' + ((btnIdx + 1) % 10); num[2] = '\0'; }
-      tftPrint(x + 3, y + 3, num, GRAY);
-
-      if (buttonNames[btnIdx][0] != '\0') {
-        int nameLen = strlen(buttonNames[btnIdx]);
-        if (nameLen <= 8) {
-          char trimmed[9];
-          strncpy(trimmed, buttonNames[btnIdx], 8);
-          trimmed[8] = '\0';
-          int len = strlen(trimmed);
-          while (len > 0 && trimmed[len-1] == ' ') trimmed[--len] = '\0';
-          tftPrint(x + (boxW - len * 6) / 2, y + boxH / 2 - 3, trimmed, WHITE);
-        } else {
-          char line1[9], line2[9];
-          strncpy(line1, buttonNames[btnIdx], 8); line1[8] = '\0';
-          strncpy(line2, buttonNames[btnIdx] + 8, 8); line2[8] = '\0';
-          int len1 = strlen(line1);
-          while (len1 > 0 && line1[len1-1] == ' ') line1[--len1] = '\0';
-          int len2 = strlen(line2);
-          while (len2 > 0 && line2[len2-1] == ' ') line2[--len2] = '\0';
-          tftPrint(x + (boxW - len1 * 6) / 2, y + boxH / 2 - 8, line1, WHITE);
-          tftPrint(x + (boxW - len2 * 6) / 2, y + boxH / 2 + 2, line2, WHITE);
-        }
-      } else if (buttonHasShortcut[btnIdx]) {
-        tftFillRect(x + boxW/2 - 12, y + boxH/2 - 5, 24, 11, SOFTCYAN);
-        tftPrintF(x + boxW/2 - 9, y + boxH/2 - 3, F("SET"), BLACK);
-      } else {
-        tftPrintF(x + boxW/2 - 15, y + boxH/2 - 3, F("EMPTY"), DARKGRAY);
-      }
-    }
-  }
-}
-
-void updateButtonDisplay(int btnIdx) {
-  int margin = 2;
-  int boxW = (DISPLAY_WIDTH - margin * 5) / 4;
-  int boxH = (DISPLAY_HEIGHT - 24 - margin * 5) / 4;
-  int row = btnIdx / 4;
+// Draws a single button tile at its grid position.
+// Used by both drawButtonGrid() and updateButtonDisplay().
+void drawSingleButton(int btnIdx) {
   int col = btnIdx % 4;
-  int x = margin + col * (boxW + margin);
-  int y = 24 + margin + row * (boxH + margin);
+  int row = btnIdx / 4;
+  int x = H_MARGIN + col * (BTN_SIZE + H_GAP);
+  int y = HEADER_H + V_MARGIN + row * (BTN_SIZE + V_GAP);
 
+  // Clear bounding box with background so rounded corners are clean.
+  tftFillRect(x, y, BTN_SIZE, BTN_SIZE, BGDARK);
+
+  // Resolve colors. Per-button custom colors only apply in custom theme (id=255).
+  uint16_t borderClr, fillClr, txtClr;
+  bool isCustom = (currentThemeId == 255);
   if (buttonHasShortcut[btnIdx]) {
-    tftFillRect(x, y, boxW, boxH, DARKGRAY);
-    tftDrawRect(x, y, boxW, boxH, SOFTCYAN);
+    fillClr   = (isCustom && btnCustom[btnIdx][1]) ? btnCustom[btnIdx][1] : CARD_ON;
+    borderClr = (isCustom && btnCustom[btnIdx][3]) ? btnCustom[btnIdx][3] : BORD_ON;
+    txtClr    = (isCustom && btnCustom[btnIdx][4]) ? btnCustom[btnIdx][4] : TXON;
   } else {
-    tftFillRect(x, y, boxW, boxH, BLACK);
-    tftDrawRect(x, y, boxW, boxH, DARKGRAY);
+    fillClr   = (isCustom && btnCustom[btnIdx][0]) ? btnCustom[btnIdx][0] : CARD_OFF;
+    borderClr = (isCustom && btnCustom[btnIdx][2]) ? btnCustom[btnIdx][2] : BORD_OFF;
+    txtClr    = (isCustom && btnCustom[btnIdx][5]) ? btnCustom[btnIdx][5] : TXOFF;
   }
+  tftFillRoundRect(x,     y,     BTN_SIZE,     BTN_SIZE,     BTN_RADIUS,     borderClr);
+  tftFillRoundRect(x + 1, y + 1, BTN_SIZE - 2, BTN_SIZE - 2, BTN_RADIUS - 1, fillClr);
 
+  // Small muted number in top-left corner.
   char num[3];
   if (btnIdx < 9) { num[0] = '0' + btnIdx + 1; num[1] = '\0'; }
   else { num[0] = '1'; num[1] = '0' + ((btnIdx + 1) % 10); num[2] = '\0'; }
-  tftPrint(x + 3, y + 3, num, GRAY);
+  tftPrint(x + 4, y + 5, num, NUM_DIM);
 
+  // Center content using resolved text color.
   if (buttonNames[btnIdx][0] != '\0') {
     int nameLen = strlen(buttonNames[btnIdx]);
     if (nameLen <= 8) {
@@ -1217,25 +1457,46 @@ void updateButtonDisplay(int btnIdx) {
       strncpy(trimmed, buttonNames[btnIdx], 8);
       trimmed[8] = '\0';
       int len = strlen(trimmed);
-      while (len > 0 && trimmed[len-1] == ' ') trimmed[--len] = '\0';
-      tftPrint(x + (boxW - len * 6) / 2, y + boxH / 2 - 3, trimmed, WHITE);
+      while (len > 0 && trimmed[len - 1] == ' ') trimmed[--len] = '\0';
+      tftPrint(x + (BTN_SIZE - len * 6) / 2, y + BTN_SIZE / 2 - 3, trimmed, txtClr);
     } else {
       char line1[9], line2[9];
-      strncpy(line1, buttonNames[btnIdx], 8); line1[8] = '\0';
+      strncpy(line1, buttonNames[btnIdx],     8); line1[8] = '\0';
       strncpy(line2, buttonNames[btnIdx] + 8, 8); line2[8] = '\0';
       int len1 = strlen(line1);
-      while (len1 > 0 && line1[len1-1] == ' ') line1[--len1] = '\0';
+      while (len1 > 0 && line1[len1 - 1] == ' ') line1[--len1] = '\0';
       int len2 = strlen(line2);
-      while (len2 > 0 && line2[len2-1] == ' ') line2[--len2] = '\0';
-      tftPrint(x + (boxW - len1 * 6) / 2, y + boxH / 2 - 8, line1, WHITE);
-      tftPrint(x + (boxW - len2 * 6) / 2, y + boxH / 2 + 2, line2, WHITE);
+      while (len2 > 0 && line2[len2 - 1] == ' ') line2[--len2] = '\0';
+      tftPrint(x + (BTN_SIZE - len1 * 6) / 2, y + BTN_SIZE / 2 - 9, line1, txtClr);
+      tftPrint(x + (BTN_SIZE - len2 * 6) / 2, y + BTN_SIZE / 2 + 2, line2, txtClr);
     }
   } else if (buttonHasShortcut[btnIdx]) {
-    tftFillRect(x + boxW/2 - 12, y + boxH/2 - 5, 24, 11, SOFTCYAN);
-    tftPrintF(x + boxW/2 - 9, y + boxH/2 - 3, F("SET"), BLACK);
+    tftPrintF(x + (BTN_SIZE - 18) / 2, y + BTN_SIZE / 2 - 3, F("SET"), txtClr);
   } else {
-    tftPrintF(x + boxW/2 - 15, y + boxH/2 - 3, F("EMPTY"), DARKGRAY);
+    tftPrintF(x + (BTN_SIZE - 30) / 2, y + BTN_SIZE / 2 - 3, F("EMPTY"), txtClr);
   }
+}
+
+void drawButtonGrid() {
+  tftFillRect(0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT, BGDARK);
+
+  // Header bar (26px) + 1px accent rule line.
+  tftFillRect(0, 0, DISPLAY_WIDTH, HEADER_H - 1, HDR_BG);
+  tftFillRect(0, HEADER_H - 1, DISPLAY_WIDTH, 1, BORD_ON);
+
+  // "SHORTCUTS" centered at 2x scale (9 chars × 12px = 106px wide, 14px tall).
+  tftPrintF2x((DISPLAY_WIDTH - 106) / 2, (HEADER_H - 1 - 14) / 2, F("SHORTCUTS"), WHITE);
+
+  // Signal icon (right side) — green=connected, amber=advertising.
+  drawSignalIcon(224, 10, bleConnected ? GREEN : SIG_ADV);
+
+  for (int i = 0; i < NUM_BUTTONS; i++) {
+    drawSingleButton(i);
+  }
+}
+
+void updateButtonDisplay(int btnIdx) {
+  drawSingleButton(btnIdx);
 }
 
 void clearShortcut(int btnIdx) {
