@@ -94,6 +94,29 @@
       max-width: 100%; overflow: hidden; white-space: normal; line-height: 1.2; margin-top: 2px;
       flex-shrink: 1; min-height: 0;
     }
+    .matrix-toggle-row {
+      display: flex; align-items: center; justify-content: space-between;
+      gap: 10px; padding: 4px 2px 0 2px;
+    }
+    .matrix-toggle-label {
+      font-size: 12px; color: #d4d4d8; user-select: none;
+    }
+    .ios-switch {
+      position: relative; width: 44px; height: 26px; flex-shrink: 0;
+      display: inline-block;
+    }
+    .ios-switch input { opacity: 0; width: 0; height: 0; }
+    .ios-slider {
+      position: absolute; cursor: pointer; inset: 0;
+      background: #3a3a3f; border-radius: 999px; transition: background .2s;
+    }
+    .ios-slider::before {
+      content: ''; position: absolute; width: 22px; height: 22px;
+      left: 2px; top: 2px; border-radius: 50%;
+      background: #fff; transition: transform .2s;
+    }
+    .ios-switch input:checked + .ios-slider { background: #34c759; }
+    .ios-switch input:checked + .ios-slider::before { transform: translateX(18px); }
     .sidebar-foot { margin-top: auto; display: flex; gap: 6px; }
     .reorder-mode .key-btn { cursor: grab; animation: wobble 0.3s infinite alternate; }
     @keyframes wobble { from{transform:rotate(-0.5deg)} to{transform:rotate(0.5deg)} }
@@ -423,6 +446,13 @@
       <aside class="sidebar">
         <div class="sidebar-label">Buttons</div>
         <div id="key-grid" class="key-grid"></div>
+        <div class="matrix-toggle-row">
+          <span class="matrix-toggle-label">Toggle Button Numbers</span>
+          <label class="ios-switch">
+            <input id="toggle-button-numbers" type="checkbox" checked />
+            <span class="ios-slider"></span>
+          </label>
+        </div>
 
 
         <div class="sidebar-foot">
@@ -577,6 +607,7 @@
     let commandSteps = [];
     let buttonShortcuts = Array.from({length:16}, () => []);
     let buttonNames = Array(16).fill('');
+    let showButtonNumbers = true;
     let readableStreamClosed, writableStreamClosed;
 
 
@@ -658,6 +689,7 @@
       document.getElementById('main-app').style.display = 'none';
     }
     initKeyGrid();
+    setShowButtonNumbers(document.getElementById('toggle-button-numbers').checked, { sync: false, silent: true });
 
     // ── Key grid ──
     function initKeyGrid() {
@@ -671,6 +703,23 @@
         b.addEventListener('click', () => selectButton(i));
         grid.appendChild(b);
       }
+      applyButtonNumberVisibility();
+    }
+
+    function applyButtonNumberVisibility() {
+      document.querySelectorAll('#key-grid .key-num').forEach(el => {
+        el.style.display = showButtonNumbers ? '' : 'none';
+      });
+    }
+
+    function setShowButtonNumbers(enabled, options = {}) {
+      const { sync = true, silent = false } = options;
+      showButtonNumbers = !!enabled;
+      const toggle = document.getElementById('toggle-button-numbers');
+      if (toggle) toggle.checked = showButtonNumbers;
+      applyButtonNumberVisibility();
+      if (sync && isConnected) queueCommand(`SETNUMS:${showButtonNumbers ? 1 : 0}`);
+      if (!silent) log(`Button numbers ${showButtonNumbers ? 'enabled' : 'hidden'}`, 'info');
     }
 
     function updateKeyBtn(index) {
@@ -1154,7 +1203,7 @@
         updateConnectionUI(true);
         log('Connected', 'success');
         readLoop();
-        setTimeout(() => { sendCommand('GETALL'); sendCommand('GETTHEME'); }, 500);
+        setTimeout(() => { sendCommand('GETALL'); sendCommand('GETTHEME'); sendCommand('GETNUMS'); }, 500);
       } catch (err) {
         log(`Connection failed: ${err.message}`, 'error');
       }
@@ -1177,6 +1226,8 @@
       for (let i=0;i<16;i++) { buttonShortcuts[i]=[]; buttonNames[i]=''; updateKeyBtn(i); }
       selectedButton = null; commandSteps = [];
       workingBtnColors.fill(null); appliedBtnColors.fill(null); btnColorDirty = false;
+      rebuildRecentColorsFromMatrix();
+      refreshGridDisplay();
       document.getElementById('editor-empty').style.display = '';
       document.getElementById('editor-content').classList.add('hidden');
       const bcc = document.getElementById('btn-color-controls');
@@ -1255,9 +1306,14 @@
       else if (msg === 'THEME_SET')     { log('Theme applied','success'); }
       else if (msg === 'COLORS_SET')    { log('Custom colors applied','success'); }
       else if (msg === 'BTNCOLOR_SET')  { log('Button color set','success'); }
+      else if (msg === 'NUMS_SET')      { log('Button numbers updated','success'); }
       else if (msg === 'SWAPPED')       { log('Buttons swapped','success'); }
       else if (msg.startsWith('THEME:'))   { parseThemeResponse(msg.substring(6)); }
       else if (msg.startsWith('BTNCOLOR:')){ parseBtnColorResponse(msg.substring(9)); }
+      else if (msg.startsWith('NUMS:')) {
+        const v = parseInt(msg.substring(5));
+        setShowButtonNumbers(v === 1, { sync: false, silent: true });
+      }
       else if (msg.startsWith('BLE:'))   { log('[BLE] '+msg.substring(4),'info'); }
       else if (msg.startsWith('DEBUG:')) { log('[DBG] '+msg.substring(6),'warning'); }
       else if (msg.startsWith('ERROR:')) { log('[ERR] '+msg.substring(6),'error'); }
@@ -1335,6 +1391,9 @@
     // ── Event bindings ──
     document.getElementById('connect-btn').addEventListener('click', connect);
     document.getElementById('disconnect-btn').addEventListener('click', disconnect);
+    document.getElementById('toggle-button-numbers').addEventListener('change', e => {
+      setShowButtonNumbers(e.target.checked);
+    });
     document.getElementById('save-btn').addEventListener('click', saveShortcut);
     document.getElementById('clear-btn').addEventListener('click', () => {
       if (selectedButton!==null) sendCommand(`CLEAR:${selectedButton}`);
@@ -1353,6 +1412,7 @@
     let currentThemeId = 0;
     let workingTheme = [0xCDD3,0x7B49,0xDE97,0xBD0E,0x9C4D,0x8B42,0xA490,0x3963,0x9C4D];
     let appliedTheme = [...workingTheme];
+    const disconnectedTheme = [0x2104,0x2104,0x2104,0x2104,0x39E7,0x39E7,0x5AEB,0x7BEF,0x5AEB];
     let workingBtnColors = Array.from({length:16}, ()=>null);
     let appliedBtnColors = Array.from({length:16}, ()=>null);
     let btnColorDirty = false;
@@ -1393,6 +1453,12 @@
       btnColorDirty = false;
     }
 
+    // Firmware uses 0 as "unset/default" for per-button custom colors.
+    // Remap pure black to near-black so explicit black picks persist.
+    function normalizeBtnColorValue(v) {
+      return v === 0 ? 1 : v;
+    }
+
     function rgb565ToHex(v) {
       const r=((v>>11)&0x1F)<<3, g=((v>>5)&0x3F)<<2, b=(v&0x1F)<<3;
       return '#'+[r,g,b].map(c=>c.toString(16).padStart(2,'0')).join('');
@@ -1427,14 +1493,34 @@
       '#E74C3C','#E91E63','#FF5722','#FF9800','#FFC107','#FFEB3B',
       '#8BC34A','#4CAF50','#009688','#00BCD4','#2196F3','#3F51B5',
       '#673AB7','#9C27B0','#795548','#607D8B','#FFFFFF','#000000',
+      '#9E9E9E','#424242','#BDBDBD','#EC407A','#26A69A','#7CB342',
     ];
     let recentColors = [];
     let paletteTarget = null; // {type:'theme',slot} or {type:'btn',slot}
 
+    function btnColorForPreview(v) {
+      return v === 1 ? 0 : v;
+    }
+
+    function rebuildRecentColorsFromMatrix() {
+      const used = [];
+      for (let i = 15; i >= 0; i--) {
+        const bc = workingBtnColors[i];
+        if (!bc) continue;
+        for (const v of bc) {
+          if (!v) continue;
+          const hex = rgb565ToHex(btnColorForPreview(v)).toUpperCase();
+          if (!used.includes(hex)) used.push(hex);
+        }
+      }
+      recentColors = used.slice(0, 12);
+    }
+
     // ── Grid display mirroring ──
     function refreshGridDisplay() {
       const grid = document.getElementById('key-grid');
-      grid.style.background = rgb565ToHex(workingTheme[0]);
+      const t = isConnected ? workingTheme : disconnectedTheme;
+      grid.style.background = rgb565ToHex(t[0]);
       for (let i = 0; i < 16; i++) updateKeyBtn(i);
     }
 
@@ -1444,24 +1530,27 @@
       const hasMacro = buttonShortcuts[index]?.length > 0;
       const name = buttonNames[index]?.trim();
       const bc = workingBtnColors[index];
-      const t = workingTheme;
-      const isCustom = (selectedThemeIdx === CUSTOM_IDX);
+      const t = isConnected ? workingTheme : disconnectedTheme;
+      const isCustom = isConnected && (selectedThemeIdx === CUSTOM_IDX);
       let fill, border, text;
       if (hasMacro) {
-        fill   = (isCustom && bc && bc[1]) ? bc[1] : t[3];
-        border = (isCustom && bc && bc[3]) ? bc[3] : t[5];
-        text   = (isCustom && bc && bc[4]) ? bc[4] : t[7];
+        fill   = (isCustom && bc && bc[1]) ? btnColorForPreview(bc[1]) : t[3];
+        border = (isCustom && bc && bc[3]) ? btnColorForPreview(bc[3]) : t[5];
+        text   = (isCustom && bc && bc[4]) ? btnColorForPreview(bc[4]) : t[7];
       } else {
-        fill   = (isCustom && bc && bc[0]) ? bc[0] : t[2];
-        border = (isCustom && bc && bc[2]) ? bc[2] : t[4];
-        text   = (isCustom && bc && bc[5]) ? bc[5] : t[8];
+        fill   = (isCustom && bc && bc[0]) ? btnColorForPreview(bc[0]) : t[2];
+        border = (isCustom && bc && bc[2]) ? btnColorForPreview(bc[2]) : t[4];
+        text   = (isCustom && bc && bc[5]) ? btnColorForPreview(bc[5]) : t[8];
       }
       b.style.background = rgb565ToHex(fill);
       b.style.borderColor = rgb565ToHex(border);
       b.classList.toggle('selected', index === selectedButton);
       const numEl = b.querySelector('.key-num');
       const nameEl = b.querySelector('.key-name');
-      if (numEl) numEl.style.color = rgb565ToHex(t[6]);
+      if (numEl) {
+        numEl.style.color = rgb565ToHex(t[6]);
+        numEl.style.display = showButtonNumbers ? '' : 'none';
+      }
       if (nameEl) {
         nameEl.style.color = rgb565ToHex(text);
         let display;
@@ -1538,7 +1627,8 @@
       document.querySelectorAll('#btn-color-controls .color-swatch').forEach(sw => {
         const [,slot] = sw.dataset.target.split(':');
         const s = parseInt(slot);
-        sw.style.background = rgb565ToHex((bc && bc[s]) ? bc[s] : defaults[s]);
+        const value = (bc && bc[s]) ? btnColorForPreview(bc[s]) : defaults[s];
+        sw.style.background = rgb565ToHex(value);
       });
     }
 
@@ -1574,6 +1664,7 @@
       if (left + 220 > window.innerWidth) left = r.left - 220;
       if (top + 320 > window.innerHeight) top = window.innerHeight - 325;
       pop.style.left = left+'px'; pop.style.top = top+'px';
+      rebuildRecentColorsFromMatrix();
       renderRecentColors();
     }
 
@@ -1582,7 +1673,7 @@
       paletteTarget = null;
     }
 
-    function pickColor(hex) {
+    function pickColor(hex, options = {}) {
       if (!paletteTarget) return;
       const v = hexToRgb565(hex);
       let shouldRefreshPreview = true;
@@ -1603,19 +1694,15 @@
         syncThemeToDevice();
       } else if (paletteTarget.type === 'btn' && selectedButton !== null) {
         if (!workingBtnColors[selectedButton]) workingBtnColors[selectedButton] = [0,0,0,0,0,0];
-        workingBtnColors[selectedButton][paletteTarget.slot] = v;
+        workingBtnColors[selectedButton][paletteTarget.slot] = normalizeBtnColorValue(v);
         btnColorDirty = true;
         syncBtnSwatches();
         shouldRefreshPreview = btnColorSlotAffectsCurrentDisplay(selectedButton, paletteTarget.slot);
         syncButtonColorsToDevice(selectedButton);
-      }
-      if (!universalPalette.map(c=>c.toUpperCase()).includes(hex.toUpperCase())) {
-        recentColors = recentColors.filter(c=>c.toUpperCase()!==hex.toUpperCase());
-        recentColors.unshift(hex.toUpperCase());
-        if (recentColors.length > 12) recentColors.pop();
+        rebuildRecentColorsFromMatrix();
       }
       if (shouldRefreshPreview) refreshGridDisplay();
-      hidePalette();
+      if (!options.keepOpen) hidePalette();
     }
 
     // Click any .color-swatch to open palette
@@ -1630,7 +1717,14 @@
       if (!e.target.closest('#color-palette-popover')) hidePalette();
     });
 
-    document.getElementById('palette-custom-picker').addEventListener('input', function() {
+    const paletteCustomPicker = document.getElementById('palette-custom-picker');
+    paletteCustomPicker.addEventListener('pointerdown', e => e.stopPropagation());
+    paletteCustomPicker.addEventListener('click', e => e.stopPropagation());
+    paletteCustomPicker.addEventListener('input', function(e) {
+      e.stopPropagation();
+    });
+    paletteCustomPicker.addEventListener('change', function(e) {
+      e.stopPropagation();
       pickColor(this.value);
     });
 
@@ -1639,6 +1733,7 @@
       workingBtnColors[selectedButton] = null;
       appliedBtnColors[selectedButton] = null;
       if (isConnected) await syncButtonColorsToDevice(selectedButton);
+      rebuildRecentColorsFromMatrix();
       syncBtnSwatches();
       refreshGridDisplay();
       log(`Reset colors for Button ${selectedButton+1}`, 'info');
@@ -1669,6 +1764,7 @@
         const hasAny = vals.some(v => v !== 0);
         workingBtnColors[idx] = hasAny ? [...vals] : null;
         appliedBtnColors[idx] = hasAny ? [...vals] : null;
+        rebuildRecentColorsFromMatrix();
       }
     }
 
@@ -1764,6 +1860,7 @@
       [buttonNames[a],buttonNames[b]]=[buttonNames[b],buttonNames[a]];
       [workingBtnColors[a],workingBtnColors[b]]=[workingBtnColors[b],workingBtnColors[a]];
       [appliedBtnColors[a],appliedBtnColors[b]]=[appliedBtnColors[b],appliedBtnColors[a]];
+      rebuildRecentColorsFromMatrix();
       updateKeyBtn(a); updateKeyBtn(b);
       if(selectedButton===a||selectedButton===b){
         commandSteps=[...(buttonShortcuts[selectedButton]||[])];
@@ -1776,6 +1873,7 @@
     // ── Init ──
     initThemeGrid();
     initPaletteGrid();
+    rebuildRecentColorsFromMatrix();
     refreshGridDisplay();
 
     // ── end of new theme/color system ──

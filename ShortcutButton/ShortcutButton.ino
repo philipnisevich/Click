@@ -382,6 +382,7 @@ const PROGMEM uint16_t presetThemes[][THEME_SLOTS] = {
 };
 #define NUM_PRESETS 15
 uint8_t currentThemeId = 0; // 0-14 = preset, 255 = custom
+bool showButtonNumbers = true;
 
 // Display dimensions
 #define DISPLAY_WIDTH  240
@@ -966,6 +967,7 @@ void saveThemeToNVS() {
   Preferences dp;
   if (!dp.begin("display", false)) return;
   dp.putUChar("tid", currentThemeId);
+  dp.putBool("nums", showButtonNumbers);
   if (currentThemeId == 255) {
     dp.putBytes("cols", (uint8_t *)themeColor, THEME_SLOTS * 2);
   }
@@ -976,6 +978,7 @@ void loadThemeFromNVS() {
   Preferences dp;
   if (!dp.begin("display", true)) return;
   currentThemeId = dp.getUChar("tid", 0);
+  showButtonNumbers = dp.getBool("nums", true);
   if (currentThemeId < NUM_PRESETS) {
     for (int i = 0; i < THEME_SLOTS; i++)
       themeColor[i] = pgm_read_word(&presetThemes[currentThemeId][i]);
@@ -1220,6 +1223,16 @@ void processCommand(String cmd) {
         }
       }
     }
+  } else if (cmd.startsWith("SETNUMS:")) {
+    int v = cmd.substring(8).toInt();
+    showButtonNumbers = (v != 0);
+    saveThemeToNVS();
+    drawButtonGrid();
+    Serial.println(F("<NUMS_SET>"));
+  } else if (cmd == "GETNUMS") {
+    Serial.print(F("<NUMS:"));
+    Serial.print(showButtonNumbers ? 1 : 0);
+    Serial.println(F(">"));
   } else if (cmd.startsWith("SWAP:")) {
     int comma = cmd.indexOf(',', 5);
     if (comma != -1) {
@@ -1253,6 +1266,9 @@ void processCommand(String cmd) {
         Serial.println(F(">"));
       }
     }
+    Serial.print(F("<NUMS:"));
+    Serial.print(showButtonNumbers ? 1 : 0);
+    Serial.println(F(">"));
   }
 }
 
@@ -1443,11 +1459,13 @@ void drawSingleButton(int btnIdx) {
   tftFillRoundRect(x,     y,     BTN_SIZE,     BTN_SIZE,     BTN_RADIUS,     borderClr);
   tftFillRoundRect(x + 1, y + 1, BTN_SIZE - 2, BTN_SIZE - 2, BTN_RADIUS - 1, fillClr);
 
-  // Small muted number in top-left corner.
-  char num[3];
-  if (btnIdx < 9) { num[0] = '0' + btnIdx + 1; num[1] = '\0'; }
-  else { num[0] = '1'; num[1] = '0' + ((btnIdx + 1) % 10); num[2] = '\0'; }
-  tftPrint(x + 4, y + 5, num, NUM_DIM);
+  // Small muted number in top-left corner (optional).
+  if (showButtonNumbers) {
+    char num[3];
+    if (btnIdx < 9) { num[0] = '0' + btnIdx + 1; num[1] = '\0'; }
+    else { num[0] = '1'; num[1] = '0' + ((btnIdx + 1) % 10); num[2] = '\0'; }
+    tftPrint(x + 4, y + 5, num, NUM_DIM);
+  }
 
   // Center content using resolved text color.
   if (buttonNames[btnIdx][0] != '\0') {
