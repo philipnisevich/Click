@@ -345,6 +345,9 @@ void setupBleKeyboard() {
 uint16_t themeColor[THEME_SLOTS] = {
   0xCDD3, 0x7B49, 0xDE97, 0xBD0E, 0x9C4D, 0x8B42, 0xA490, 0x3963, 0x9C4D
 };
+uint16_t customThemeColor[THEME_SLOTS] = {
+  0x0000, 0x2104, 0x1082, 0x2104, 0x7BEF, 0xFFFF, 0x5AEB, 0xFFFF, 0x7BEF
+};
 // Convenience accessors
 #define BGDARK     themeColor[0]
 #define HDR_BG     themeColor[1]
@@ -968,6 +971,7 @@ void saveThemeToNVS() {
   if (!dp.begin("display", false)) return;
   dp.putUChar("tid", currentThemeId);
   dp.putBool("nums", showButtonNumbers);
+  dp.putBytes("ccols", (uint8_t *)customThemeColor, THEME_SLOTS * 2);
   if (currentThemeId == 255) {
     dp.putBytes("cols", (uint8_t *)themeColor, THEME_SLOTS * 2);
   }
@@ -979,16 +983,39 @@ void loadThemeFromNVS() {
   if (!dp.begin("display", true)) return;
   currentThemeId = dp.getUChar("tid", 0);
   showButtonNumbers = dp.getBool("nums", true);
+  size_t customLen = dp.getBytesLength("ccols");
+  if (customLen == THEME_SLOTS * 2) {
+    dp.getBytes("ccols", (uint8_t *)customThemeColor, THEME_SLOTS * 2);
+  } else {
+    size_t legacyLen = dp.getBytesLength("cols");
+    if (legacyLen == THEME_SLOTS * 2) {
+      dp.getBytes("cols", (uint8_t *)customThemeColor, THEME_SLOTS * 2);
+    } else {
+      for (int i = 0; i < THEME_SLOTS; i++) {
+        customThemeColor[i] = pgm_read_word(&presetThemes[2][i]); // Mono default custom
+      }
+    }
+  }
   if (currentThemeId < NUM_PRESETS) {
     for (int i = 0; i < THEME_SLOTS; i++)
       themeColor[i] = pgm_read_word(&presetThemes[currentThemeId][i]);
   } else if (currentThemeId == 255) {
-    size_t len = dp.getBytesLength("cols");
-    if (len == THEME_SLOTS * 2) {
-      dp.getBytes("cols", (uint8_t *)themeColor, THEME_SLOTS * 2);
-    }
+    for (int i = 0; i < THEME_SLOTS; i++) themeColor[i] = customThemeColor[i];
+  } else {
+    currentThemeId = 0;
+    for (int i = 0; i < THEME_SLOTS; i++)
+      themeColor[i] = pgm_read_word(&presetThemes[0][i]);
   }
   dp.end();
+}
+
+void sendCustomTheme() {
+  Serial.print(F("<CUSTOM:"));
+  for (int i = 0; i < THEME_SLOTS; i++) {
+    if (i) Serial.print(',');
+    Serial.print(customThemeColor[i]);
+  }
+  Serial.println(F(">"));
 }
 
 void saveBtnColorToNVS(int idx) {
@@ -1193,7 +1220,10 @@ void processCommand(String cmd) {
     }
     if (idx == THEME_SLOTS) {
       currentThemeId = 255; // custom
-      for (int i = 0; i < THEME_SLOTS; i++) themeColor[i] = cols[i];
+      for (int i = 0; i < THEME_SLOTS; i++) {
+        themeColor[i] = cols[i];
+        customThemeColor[i] = cols[i];
+      }
       saveThemeToNVS();
       drawButtonGrid();
       Serial.println(F("<COLORS_SET>"));
@@ -1251,6 +1281,7 @@ void processCommand(String cmd) {
       Serial.print(themeColor[i]);
     }
     Serial.println(F(">"));
+    sendCustomTheme();
     // Also send per-button colors (6 values each)
     for (int i = 0; i < NUM_BUTTONS; i++) {
       bool hasCustom = false;
@@ -1269,6 +1300,8 @@ void processCommand(String cmd) {
     Serial.print(F("<NUMS:"));
     Serial.print(showButtonNumbers ? 1 : 0);
     Serial.println(F(">"));
+  } else if (cmd == "GETCUSTOM") {
+    sendCustomTheme();
   }
 }
 

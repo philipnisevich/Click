@@ -1203,7 +1203,7 @@
         updateConnectionUI(true);
         log('Connected', 'success');
         readLoop();
-        setTimeout(() => { sendCommand('GETALL'); sendCommand('GETTHEME'); sendCommand('GETNUMS'); }, 500);
+        setTimeout(() => { sendCommand('GETALL'); sendCommand('GETTHEME'); sendCommand('GETCUSTOM'); sendCommand('GETNUMS'); }, 500);
       } catch (err) {
         log(`Connection failed: ${err.message}`, 'error');
       }
@@ -1309,6 +1309,7 @@
       else if (msg === 'NUMS_SET')      { log('Button numbers updated','success'); }
       else if (msg === 'SWAPPED')       { log('Buttons swapped','success'); }
       else if (msg.startsWith('THEME:'))   { parseThemeResponse(msg.substring(6)); }
+      else if (msg.startsWith('CUSTOM:'))  { parseCustomResponse(msg.substring(7)); }
       else if (msg.startsWith('BTNCOLOR:')){ parseBtnColorResponse(msg.substring(9)); }
       else if (msg.startsWith('NUMS:')) {
         const v = parseInt(msg.substring(5));
@@ -1753,6 +1754,30 @@
       if (selectedThemeIdx === CUSTOM_IDX) syncSwatches();
       updateBtnColorSection();
       refreshGridDisplay();
+    }
+
+    function parseCustomResponse(data) {
+      const vals = data.split(',').map(Number);
+      if (vals.length < 9) return;
+      customColors = vals.slice(0, 9);
+
+      const swEl = document.querySelector(`.theme-swatch[data-theme-idx="${CUSTOM_IDX}"]`);
+      if (swEl) {
+        swEl.querySelector('.theme-swatch-inner').style.background = rgb565ToHex(customColors[0]);
+        const cells = swEl.querySelectorAll('.theme-swatch-cell');
+        cells[0].style.background = rgb565ToHex(customColors[2]);
+        cells[1].style.background = rgb565ToHex(customColors[3]);
+        cells[2].style.background = rgb565ToHex(customColors[3]);
+        cells[3].style.background = rgb565ToHex(customColors[2]);
+      }
+
+      if (selectedThemeIdx === CUSTOM_IDX) {
+        workingTheme = [...customColors];
+        appliedTheme = [...customColors];
+        syncSwatches();
+        updateBtnColorSection();
+        refreshGridDisplay();
+      }
     }
 
     function parseBtnColorResponse(data) {
