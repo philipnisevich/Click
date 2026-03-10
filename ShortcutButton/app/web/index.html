@@ -291,6 +291,26 @@
     .modal-box p  { font-size: 11px; color: #71717a; margin-bottom: 18px; line-height: 1.5; }
     .key-display  { font-size: 30px; font-weight: 700; color: #dc2626; min-height: 44px; margin-bottom: 14px; font-family: monospace; }
 
+    /* ── Loading shortcuts overlay ── */
+    .loading-overlay {
+      position: fixed; inset: 0; z-index: 1450; background: rgba(0,0,0,.6);
+      display: flex; align-items: center; justify-content: center; backdrop-filter: blur(3px);
+    }
+    .loading-overlay.hidden { display: none; }
+    .loading-box {
+      background: #1e1e1e; border: 1px solid #2e2e2e; border-radius: 12px;
+      padding: 22px 30px; text-align: center; min-width: 260px;
+      box-shadow: 0 10px 30px rgba(0,0,0,.6);
+    }
+    .loading-spinner {
+      width: 26px; height: 26px; border-radius: 50%;
+      border: 3px solid #2e2e2e; border-top-color: #dc2626;
+      margin: 0 auto 10px; animation: spin .8s linear infinite;
+    }
+    .loading-title { font-size: 13px; font-weight: 700; margin-bottom: 4px; }
+    .loading-sub { font-size: 11px; color: #71717a; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
     /* ── Recording overlay ── */
     .record-overlay {
       position: fixed; inset: 0; z-index: 1400; background: rgba(0,0,0,.7);
@@ -549,6 +569,15 @@
       <div class="log-header">Activity Log</div>
       <div id="log-body" class="log-body"></div>
     </div>
+
+    <!-- Loading shortcuts overlay -->
+    <div id="loading-overlay" class="loading-overlay hidden">
+      <div class="loading-box">
+        <div class="loading-spinner"></div>
+        <div class="loading-title">Loading Shortcuts</div>
+        <div class="loading-sub">Syncing device data…</div>
+      </div>
+    </div>
   </div>
 
   <!-- Step type popover -->
@@ -609,6 +638,8 @@
     let buttonShortcuts = Array.from({length:16}, () => []);
     let buttonNames = Array(16).fill('');
     let showButtonNumbers = true;
+    let deferGridRender = false;
+    let pendingGridRefresh = false;
     let readableStreamClosed, writableStreamClosed;
 
 
@@ -1204,7 +1235,13 @@
         updateConnectionUI(true);
         log('Connected', 'success');
         readLoop();
-        setTimeout(() => { sendCommand('GETALL'); sendCommand('GETTHEME'); sendCommand('GETCUSTOM'); sendCommand('GETNUMS'); }, 500);
+        setTimeout(() => {
+          beginBulkRender();
+          sendCommand('GETALL');
+          sendCommand('GETTHEME');
+          sendCommand('GETCUSTOM');
+          sendCommand('GETNUMS');
+        }, 500);
       } catch (err) {
         log(`Connection failed: ${err.message}`, 'error');
       }
@@ -1224,6 +1261,7 @@
 
     function cleanup() {
       readLoopRunning = false; reader = null; writer = null; port = null; isConnected = false;
+      hideLoadingOverlay();
       for (let i=0;i<16;i++) { buttonShortcuts[i]=[]; buttonNames[i]=''; updateKeyBtn(i); }
       selectedButton = null; commandSteps = [];
       workingBtnColors.fill(null); appliedBtnColors.fill(null); btnColorDirty = false;
@@ -1244,7 +1282,35 @@
       document.getElementById('disconnect-btn').disabled = !connected;
       document.getElementById('clear-all-btn').disabled  = !connected;
       document.getElementById('reorder-btn').disabled   = !connected;
+      updateCustomSwatchPreview(customColors);
       updateToolbar();
+    }
+
+    function showLoadingOverlay() {
+      const el = document.getElementById('loading-overlay');
+      if (el) el.classList.remove('hidden');
+    }
+
+    function hideLoadingOverlay() {
+      const el = document.getElementById('loading-overlay');
+      if (el) el.classList.add('hidden');
+    }
+
+    function beginBulkRender() {
+      deferGridRender = true;
+      pendingGridRefresh = false;
+      showLoadingOverlay();
+    }
+
+    function endBulkRender() {
+      if (!deferGridRender) return;
+      deferGridRender = false;
+      if (pendingGridRefresh) {
+        refreshGridDisplay();
+        updateBtnColorSection();
+        pendingGridRefresh = false;
+      }
+      hideLoadingOverlay();
     }
 
     async function sendCommand(cmd) {
@@ -1297,7 +1363,7 @@
         for(let i=0;i<16;i++){buttonShortcuts[i]=[];buttonNames[i]='';updateKeyBtn(i);}
         commandSteps=[]; renderSteps(); updateToolbar();
       }
-      else if (msg==='DONE')   { log('All shortcuts loaded','success'); }
+      else if (msg==='DONE')   { log('All shortcuts loaded','success'); endBulkRender(); }
       else if (msg.startsWith('STEPS:'))   { parseShortcutResponse(msg.substring(6)); }
       else if (msg.startsWith('PRESSED:')) {
         const idx = parseInt(msg.substring(8));
@@ -1354,8 +1420,9 @@
         }
       }
       buttonShortcuts[btnIdx] = steps;
-      updateKeyBtn(btnIdx);
       if (btnIdx===selectedButton) { commandSteps=[...steps]; renderSteps(); }
+      if (deferGridRender) { pendingGridRefresh = true; return; }
+      updateKeyBtn(btnIdx);
     }
 
     // ── Save ──
@@ -1568,6 +1635,7 @@
       presetThemes.forEach((t, i) => grid.appendChild(makeThemeSwatch(t.name, t.c, i)));
       grid.appendChild(makeThemeSwatch('Custom', customColors, CUSTOM_IDX));
       updateThemeSelection();
+      updateCustomSwatchPreview(customColors);
     }
 
     function makeThemeSwatch(name, colors, idx) {
@@ -1611,6 +1679,22 @@
         const [,slot] = sw.dataset.target.split(':');
         sw.style.background = rgb565ToHex(workingTheme[parseInt(slot)]);
       });
+    }
+
+    function updateCustomSwatchPreview(colors) {
+      const swEl = document.querySelector(`.theme-swatch[data-theme-idx="${CUSTOM_IDX}"]`);
+      if (!swEl) return;
+      const t = isConnected ? colors : disconnectedTheme;
+      swEl.querySelector('.theme-swatch-inner').style.background = rgb565ToHex(t[0]);
+      const cells = swEl.querySelectorAll('.theme-swatch-cell');
+      cells[0].style.background = rgb565ToHex(t[2]);
+      cells[1].style.background = rgb565ToHex(t[3]);
+      cells[2].style.background = rgb565ToHex(t[3]);
+      cells[3].style.background = rgb565ToHex(t[2]);
+      cells[0].style.borderColor = rgb565ToHex(t[4]);
+      cells[1].style.borderColor = rgb565ToHex(t[5]);
+      cells[2].style.borderColor = rgb565ToHex(t[5]);
+      cells[3].style.borderColor = rgb565ToHex(t[4]);
     }
 
     function updateBtnColorSection() {
@@ -1683,16 +1767,7 @@
         workingTheme[paletteTarget.slot] = v;
         if (selectedThemeIdx === CUSTOM_IDX) customColors = [...workingTheme];
         syncSwatches();
-        // Update custom swatch preview
-        const swEl = document.querySelector(`.theme-swatch[data-theme-idx="${CUSTOM_IDX}"]`);
-        if (swEl) {
-          swEl.querySelector('.theme-swatch-inner').style.background = rgb565ToHex(workingTheme[0]);
-          const cells = swEl.querySelectorAll('.theme-swatch-cell');
-          cells[0].style.background = rgb565ToHex(workingTheme[2]);
-          cells[1].style.background = rgb565ToHex(workingTheme[3]);
-          cells[2].style.background = rgb565ToHex(workingTheme[3]);
-          cells[3].style.background = rgb565ToHex(workingTheme[2]);
-        }
+        updateCustomSwatchPreview(workingTheme);
         syncThemeToDevice();
       } else if (paletteTarget.type === 'btn' && selectedButton !== null) {
         if (!workingBtnColors[selectedButton]) workingBtnColors[selectedButton] = [0,0,0,0,0,0];
@@ -1754,6 +1829,7 @@
       document.getElementById('custom-controls').classList.toggle('hidden', selectedThemeIdx !== CUSTOM_IDX);
       if (selectedThemeIdx === CUSTOM_IDX) syncSwatches();
       updateBtnColorSection();
+      if (deferGridRender) { pendingGridRefresh = true; return; }
       refreshGridDisplay();
     }
 
@@ -1762,15 +1838,7 @@
       if (vals.length < 9) return;
       customColors = vals.slice(0, 9);
 
-      const swEl = document.querySelector(`.theme-swatch[data-theme-idx="${CUSTOM_IDX}"]`);
-      if (swEl) {
-        swEl.querySelector('.theme-swatch-inner').style.background = rgb565ToHex(customColors[0]);
-        const cells = swEl.querySelectorAll('.theme-swatch-cell');
-        cells[0].style.background = rgb565ToHex(customColors[2]);
-        cells[1].style.background = rgb565ToHex(customColors[3]);
-        cells[2].style.background = rgb565ToHex(customColors[3]);
-        cells[3].style.background = rgb565ToHex(customColors[2]);
-      }
+      updateCustomSwatchPreview(customColors);
 
       if (selectedThemeIdx === CUSTOM_IDX) {
         workingTheme = [...customColors];
@@ -1791,6 +1859,7 @@
         workingBtnColors[idx] = hasAny ? [...vals] : null;
         appliedBtnColors[idx] = hasAny ? [...vals] : null;
         rebuildRecentColorsFromMatrix();
+        if (deferGridRender) { pendingGridRefresh = true; return; }
         if (selectedThemeIdx === CUSTOM_IDX) {
           updateKeyBtn(idx);
           if (idx === selectedButton) {
