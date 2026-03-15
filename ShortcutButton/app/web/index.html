@@ -473,6 +473,13 @@
             <span class="ios-slider"></span>
           </label>
         </div>
+        <div class="matrix-toggle-row">
+          <span class="matrix-toggle-label">Unify Button Colors</span>
+          <label class="ios-switch">
+            <input id="toggle-unified-colors" type="checkbox" />
+            <span class="ios-slider"></span>
+          </label>
+        </div>
 
 
         <div class="sidebar-foot">
@@ -515,14 +522,14 @@
           <!-- Per-button colors (custom theme only) -->
           <div id="btn-color-controls" style="display:none;padding:8px 18px;border-bottom:1px solid #222;background:#1a1a1a;flex-shrink:0">
             <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-              <span style="font-size:9px;font-weight:700;color:#52525b;text-transform:uppercase;letter-spacing:.8px">Active:</span>
+              <span id="btn-color-active-label" style="font-size:9px;font-weight:700;color:#52525b;text-transform:uppercase;letter-spacing:.8px">Active:</span>
               <div class="color-row" style="gap:4px"><label style="min-width:auto;font-size:10px">Fill</label><div class="color-swatch" data-target="btn:1"></div></div>
               <div class="color-row" style="gap:4px"><label style="min-width:auto;font-size:10px">Border</label><div class="color-swatch" data-target="btn:3"></div></div>
               <div class="color-row" style="gap:4px"><label style="min-width:auto;font-size:10px">Text</label><div class="color-swatch" data-target="btn:4"></div></div>
-              <span style="font-size:9px;font-weight:700;color:#52525b;text-transform:uppercase;letter-spacing:.8px;margin-left:8px">Empty:</span>
-              <div class="color-row" style="gap:4px"><label style="min-width:auto;font-size:10px">Fill</label><div class="color-swatch" data-target="btn:0"></div></div>
-              <div class="color-row" style="gap:4px"><label style="min-width:auto;font-size:10px">Border</label><div class="color-swatch" data-target="btn:2"></div></div>
-              <div class="color-row" style="gap:4px"><label style="min-width:auto;font-size:10px">Text</label><div class="color-swatch" data-target="btn:5"></div></div>
+              <span id="btn-color-empty-label" style="font-size:9px;font-weight:700;color:#52525b;text-transform:uppercase;letter-spacing:.8px;margin-left:8px">Empty:</span>
+              <div class="color-row" data-btn-empty="1" style="gap:4px"><label style="min-width:auto;font-size:10px">Fill</label><div class="color-swatch" data-target="btn:0"></div></div>
+              <div class="color-row" data-btn-empty="1" style="gap:4px"><label style="min-width:auto;font-size:10px">Border</label><div class="color-swatch" data-target="btn:2"></div></div>
+              <div class="color-row" data-btn-empty="1" style="gap:4px"><label style="min-width:auto;font-size:10px">Text</label><div class="color-swatch" data-target="btn:5"></div></div>
               <button id="btn-color-reset-all" class="btn btn-ghost" style="font-size:10px;padding:2px 8px;margin-left:auto">Reset</button>
             </div>
           </div>
@@ -551,14 +558,14 @@
         <div id="custom-controls" class="custom-controls hidden">
           <div class="display-label" style="margin-top:4px">Theme Colors</div>
           <div class="color-row"><label>Background</label><div class="color-swatch" data-target="theme:0"></div></div>
-          <div style="font-size:10px;font-weight:700;color:#71717a;text-transform:uppercase;letter-spacing:.8px;margin-top:4px">Active</div>
+          <div id="theme-active-label" style="font-size:10px;font-weight:700;color:#71717a;text-transform:uppercase;letter-spacing:.8px;margin-top:4px">Active</div>
           <div class="color-row"><label>Fill</label><div class="color-swatch" data-target="theme:3"></div></div>
           <div class="color-row"><label>Border</label><div class="color-swatch" data-target="theme:5"></div></div>
           <div class="color-row"><label>Text</label><div class="color-swatch" data-target="theme:7"></div></div>
-          <div style="font-size:10px;font-weight:700;color:#71717a;text-transform:uppercase;letter-spacing:.8px;margin-top:4px">Empty</div>
-          <div class="color-row"><label>Fill</label><div class="color-swatch" data-target="theme:2"></div></div>
-          <div class="color-row"><label>Border</label><div class="color-swatch" data-target="theme:4"></div></div>
-          <div class="color-row"><label>Text</label><div class="color-swatch" data-target="theme:8"></div></div>
+          <div id="theme-empty-label" style="font-size:10px;font-weight:700;color:#71717a;text-transform:uppercase;letter-spacing:.8px;margin-top:4px">Empty</div>
+          <div class="color-row" data-theme-empty="1"><label>Fill</label><div class="color-swatch" data-target="theme:2"></div></div>
+          <div class="color-row" data-theme-empty="1"><label>Border</label><div class="color-swatch" data-target="theme:4"></div></div>
+          <div class="color-row" data-theme-empty="1"><label>Text</label><div class="color-swatch" data-target="theme:8"></div></div>
         </div>
         <!-- Per-button colors moved to editor section -->
       </aside>
@@ -638,9 +645,17 @@
     let buttonShortcuts = Array.from({length:16}, () => []);
     let buttonNames = Array(16).fill('');
     let showButtonNumbers = true;
+    let unifyButtonColors = false;
     let deferGridRender = false;
     let pendingGridRefresh = false;
     let readableStreamClosed, writableStreamClosed;
+
+    const UNIFY_STORAGE_KEY = 'sb_unify_button_colors';
+    const UNIFY_BACKUP_KEY = 'sb_unify_button_colors_backup';
+    const UNIFY_BASE_THEME_KEY = 'sb_unify_button_colors_base_theme';
+    let unifyBackup = null;
+    let unifyBaseThemeIdx = null;
+    const FIRMWARE_UNIFY = true;
 
 
     // Key capture state
@@ -752,6 +767,91 @@
       applyButtonNumberVisibility();
       if (sync && isConnected) queueCommand(`SETNUMS:${showButtonNumbers ? 1 : 0}`);
       if (!silent) log(`Button numbers ${showButtonNumbers ? 'enabled' : 'hidden'}`, 'info');
+    }
+
+    function loadUnifiedSettings() {
+      try {
+        unifyButtonColors = localStorage.getItem(UNIFY_STORAGE_KEY) === '1';
+      } catch (e) {
+        unifyButtonColors = false;
+      }
+      try {
+        const raw = localStorage.getItem(UNIFY_BACKUP_KEY);
+        unifyBackup = raw ? JSON.parse(raw) : null;
+        if (unifyBackup) {
+          if (!Array.isArray(unifyBackup.buttons)) unifyBackup.buttons = [];
+          if (!Array.isArray(unifyBackup.modified)) unifyBackup.modified = Array(16).fill(false);
+        }
+      } catch (e) {
+        unifyBackup = null;
+      }
+      try {
+        const rawBase = localStorage.getItem(UNIFY_BASE_THEME_KEY);
+        const parsed = rawBase !== null ? parseInt(rawBase, 10) : NaN;
+        unifyBaseThemeIdx = Number.isFinite(parsed) ? parsed : null;
+      } catch (e) {
+        unifyBaseThemeIdx = null;
+      }
+      const toggle = document.getElementById('toggle-unified-colors');
+      if (toggle) toggle.checked = unifyButtonColors;
+      applyUnifiedUI();
+    }
+
+    function saveUnifiedSettings() {
+      try {
+        localStorage.setItem(UNIFY_STORAGE_KEY, unifyButtonColors ? '1' : '0');
+        if (unifyBackup) localStorage.setItem(UNIFY_BACKUP_KEY, JSON.stringify(unifyBackup));
+        if (unifyBaseThemeIdx !== null) {
+          localStorage.setItem(UNIFY_BASE_THEME_KEY, String(unifyBaseThemeIdx));
+        } else {
+          localStorage.removeItem(UNIFY_BASE_THEME_KEY);
+        }
+      } catch (e) {}
+    }
+
+    function applyUnifiedUI() {
+      const themeActiveLabel = document.getElementById('theme-active-label');
+      const themeEmptyLabel = document.getElementById('theme-empty-label');
+      const btnActiveLabel = document.getElementById('btn-color-active-label');
+      const btnEmptyLabel = document.getElementById('btn-color-empty-label');
+      const unified = isUnifiedMode();
+      const activeText = unified ? 'Buttons' : 'Active';
+      if (themeActiveLabel) themeActiveLabel.textContent = activeText;
+      if (btnActiveLabel) btnActiveLabel.textContent = activeText + ':';
+      const showEmpty = !unified;
+      if (themeEmptyLabel) themeEmptyLabel.style.display = showEmpty ? '' : 'none';
+      if (btnEmptyLabel) btnEmptyLabel.style.display = showEmpty ? '' : 'none';
+      document.querySelectorAll('[data-theme-empty="1"]').forEach(el => {
+        el.style.display = showEmpty ? '' : 'none';
+      });
+      document.querySelectorAll('[data-btn-empty="1"]').forEach(el => {
+        el.style.display = showEmpty ? '' : 'none';
+      });
+    }
+
+    async function setUnifiedButtonColors(enabled, options = {}) {
+      const { sync = true } = options;
+      unifyButtonColors = !!enabled;
+      const toggle = document.getElementById('toggle-unified-colors');
+      if (toggle) toggle.checked = unifyButtonColors;
+      if (unifyButtonColors) {
+        if (selectedThemeIdx !== CUSTOM_IDX) {
+          unifyBaseThemeIdx = selectedThemeIdx;
+        }
+      } else {
+        unifyBaseThemeIdx = null;
+      }
+      saveUnifiedSettings();
+      applyUnifiedUI();
+      if (sync && isConnected) {
+        await syncUnifyMode({ awaitAck: true });
+        await syncBtnCustomMode({ awaitAck: true });
+        if (!unifyButtonColors && selectedThemeIdx !== CUSTOM_IDX && currentThemeId === 255) {
+          await syncThemeToDevice({ awaitAck: true });
+        }
+      }
+      updateBtnColorSection();
+      refreshGridDisplay();
     }
 
     function updateKeyBtn(index) {
@@ -1363,16 +1463,24 @@
         for(let i=0;i<16;i++){buttonShortcuts[i]=[];buttonNames[i]='';updateKeyBtn(i);}
         commandSteps=[]; renderSteps(); updateToolbar();
       }
-      else if (msg==='DONE')   { log('All shortcuts loaded','success'); endBulkRender(); }
+      else if (msg==='DONE')   {
+        log('All shortcuts loaded','success');
+        endBulkRender();
+        if (unifyButtonColors) {
+          applyUnifiedToDevice();
+        }
+      }
       else if (msg.startsWith('STEPS:'))   { parseShortcutResponse(msg.substring(6)); }
       else if (msg.startsWith('PRESSED:')) {
         const idx = parseInt(msg.substring(8));
         log(`Button ${idx+1} pressed`, 'info'); flashKeyBtn(idx);
       }
       else if (msg === 'BONDS_CLEARED'){ log('Pairing data cleared — re-pair the device', 'warning'); }
-      else if (msg === 'THEME_SET')     { log('Theme applied','success'); }
-      else if (msg === 'COLORS_SET')    { log('Custom colors applied','success'); }
-      else if (msg === 'BTNCOLOR_SET')  { log('Button color set','success'); }
+      else if (msg === 'THEME_SET')     { log('Theme applied','success'); signalAck('THEME_SET'); }
+      else if (msg === 'COLORS_SET')    { log('Custom colors applied','success'); signalAck('COLORS_SET'); }
+      else if (msg === 'BTNCOLOR_SET')  { log('Button color set','success'); signalAck('BTNCOLOR_SET'); }
+      else if (msg === 'BTNCUSTOM_SET') { log('Button custom colors updated','success'); signalAck('BTNCUSTOM_SET'); }
+      else if (msg === 'UNIFY_SET')     { log('Unified colors updated','success'); signalAck('UNIFY_SET'); }
       else if (msg === 'NUMS_SET')      { log('Button numbers updated','success'); }
       else if (msg === 'SWAPPED')       { log('Buttons swapped','success'); }
       else if (msg.startsWith('THEME:'))   { parseThemeResponse(msg.substring(6)); }
@@ -1463,6 +1571,9 @@
     document.getElementById('toggle-button-numbers').addEventListener('change', e => {
       setShowButtonNumbers(e.target.checked);
     });
+    document.getElementById('toggle-unified-colors').addEventListener('change', e => {
+      setUnifiedButtonColors(e.target.checked);
+    });
     document.getElementById('save-btn').addEventListener('click', saveShortcut);
     document.getElementById('clear-btn').addEventListener('click', () => {
       if (selectedButton!==null) sendCommand(`CLEAR:${selectedButton}`);
@@ -1486,9 +1597,41 @@
     let appliedBtnColors = Array.from({length:16}, ()=>null);
     let btnColorDirty = false;
     let commandQueue = Promise.resolve();
+    const ackWaiters = new Map();
 
-    function queueCommand(cmd) {
-      commandQueue = commandQueue.then(() => sendCommand(cmd));
+    function waitForAck(type, timeoutMs) {
+      return new Promise(resolve => {
+        const list = ackWaiters.get(type) || [];
+        ackWaiters.set(type, list);
+        const waiter = { resolve };
+        list.push(waiter);
+        if (timeoutMs && timeoutMs > 0) {
+          setTimeout(() => {
+            const idx = list.indexOf(waiter);
+            if (idx !== -1) list.splice(idx, 1);
+            resolve(false);
+          }, timeoutMs);
+        }
+      });
+    }
+
+    function signalAck(type) {
+      const list = ackWaiters.get(type);
+      if (!list || list.length === 0) return;
+      const waiter = list.shift();
+      if (waiter) waiter.resolve(true);
+    }
+
+    function queueCommand(cmd, options = {}) {
+      const { awaitAckType = null, timeoutMs = 1000 } = options;
+      if (!awaitAckType) {
+        commandQueue = commandQueue.then(() => sendCommand(cmd));
+        return commandQueue;
+      }
+      commandQueue = commandQueue.then(() => {
+        const ackPromise = waitForAck(awaitAckType, timeoutMs);
+        return sendCommand(cmd).then(() => ackPromise);
+      });
       return commandQueue;
     }
 
@@ -1496,30 +1639,139 @@
       return (buttonShortcuts[idx]?.length || 0) > 0;
     }
 
+    function shouldDisableBtnCustom() {
+      return selectedThemeIdx !== CUSTOM_IDX;
+    }
+
     function btnColorSlotAffectsCurrentDisplay(idx, slot) {
+      if (isUnifiedMode()) {
+        const activeSlots = [1, 3, 4];
+        return activeSlots.includes(slot);
+      }
       const activeSlots = [1, 3, 4];
       const emptySlots = [0, 2, 5];
       return buttonHasMacroAt(idx) ? activeSlots.includes(slot) : emptySlots.includes(slot);
     }
 
-    async function syncThemeToDevice() {
+    function isUnifiedMode() {
+      return unifyButtonColors;
+    }
+
+    function getUnifiedTheme(source) {
+      const t = [...source];
+      t[2] = t[3];
+      t[4] = t[5];
+      t[8] = t[7];
+      return t;
+    }
+
+    function getEffectiveTheme(source) {
+      return isUnifiedMode() ? getUnifiedTheme(source) : [...source];
+    }
+
+    function getUnifiedBtnColors(bc) {
+      if (!bc) return null;
+      const out = [...bc];
+      out[0] = out[1];
+      out[2] = out[3];
+      out[5] = out[4];
+      return out;
+    }
+
+    function getEffectiveBtnColors(bc) {
+      return isUnifiedMode() ? getUnifiedBtnColors(bc) : bc;
+    }
+
+    function captureUnifiedBackup() {
+      if (!isConnected) return;
+      unifyBackup = {
+        theme: [workingTheme[2], workingTheme[4], workingTheme[8]],
+        buttons: workingBtnColors.map(bc => (bc ? [...bc] : null)),
+        modified: Array(16).fill(false),
+      };
+      saveUnifiedSettings();
+    }
+
+    async function syncThemeToDevice(options = {}) {
+      const { awaitAck = false } = options;
       if (!isConnected) return;
       if (selectedThemeIdx !== CUSTOM_IDX) {
         currentThemeId = selectedThemeIdx;
-        await queueCommand(`SETTHEME:${selectedThemeIdx}`);
+        if (awaitAck) await queueCommand(`SETTHEME:${selectedThemeIdx}`, { awaitAckType: 'THEME_SET' });
+        else await queueCommand(`SETTHEME:${selectedThemeIdx}`);
       } else {
         currentThemeId = 255;
-        await queueCommand(`SETCOLORS:${workingTheme.join(',')}`);
+        const themeToSend = [...workingTheme];
+        if (awaitAck) await queueCommand(`SETCOLORS:${themeToSend.join(',')}`, { awaitAckType: 'COLORS_SET' });
+        else await queueCommand(`SETCOLORS:${themeToSend.join(',')}`);
+        appliedTheme = [...themeToSend];
+        return;
       }
       appliedTheme = [...workingTheme];
     }
 
-    async function syncButtonColorsToDevice(btnIdx) {
+    async function syncBtnCustomMode(options = {}) {
+      const { awaitAck = false } = options;
+      if (!isConnected) return;
+      const enable = shouldDisableBtnCustom() ? 0 : 1;
+      if (awaitAck) await queueCommand(`SETBTNCUSTOM:${enable}`, { awaitAckType: 'BTNCUSTOM_SET' });
+      else await queueCommand(`SETBTNCUSTOM:${enable}`);
+    }
+
+    async function syncUnifyMode(options = {}) {
+      const { awaitAck = false } = options;
+      if (!isConnected) return;
+      const enable = unifyButtonColors ? 1 : 0;
+      if (awaitAck) await queueCommand(`SETUNIFY:${enable}`, { awaitAckType: 'UNIFY_SET' });
+      else await queueCommand(`SETUNIFY:${enable}`);
+    }
+
+    async function sendBtnColorsToDevice(btnIdx, vals, options = {}) {
+      const { awaitAck = false, raw = false } = options;
       if (!isConnected || btnIdx === null || btnIdx < 0 || btnIdx >= 16) return;
-      const vals = workingBtnColors[btnIdx] ? workingBtnColors[btnIdx] : [0,0,0,0,0,0];
-      await queueCommand(`BTNCOLOR:${btnIdx}:${vals.join(',')}`);
-      appliedBtnColors[btnIdx] = workingBtnColors[btnIdx] ? [...workingBtnColors[btnIdx]] : null;
+      let useVals = Array.isArray(vals) ? [...vals] : [0,0,0,0,0,0];
+      if (awaitAck) await queueCommand(`BTNCOLOR:${btnIdx}:${useVals.join(',')}`, { awaitAckType: 'BTNCOLOR_SET' });
+      else await queueCommand(`BTNCOLOR:${btnIdx}:${useVals.join(',')}`);
+      appliedBtnColors[btnIdx] = Array.isArray(vals) ? [...useVals] : null;
       btnColorDirty = false;
+    }
+
+    async function syncButtonColorsToDevice(btnIdx, options = {}) {
+      const vals = workingBtnColors[btnIdx] ? workingBtnColors[btnIdx] : null;
+      await sendBtnColorsToDevice(btnIdx, vals, options);
+    }
+
+    async function applyUnifiedToDevice() {
+      if (!isConnected) return;
+      await syncUnifyMode({ awaitAck: true });
+    }
+
+    function restoreUnifiedTheme(colors) {
+      if (!unifyBackup || !unifyBackup.theme || colors.length < 9) return colors;
+      if (colors[2] === colors[3] && colors[4] === colors[5] && colors[8] === colors[7]) {
+        colors[2] = unifyBackup.theme[0];
+        colors[4] = unifyBackup.theme[1];
+        colors[8] = unifyBackup.theme[2];
+      }
+      return colors;
+    }
+
+    function restoreUnifiedBtnColors(idx, vals) {
+      if (!unifyBackup || !unifyBackup.buttons || !unifyBackup.buttons[idx] || vals.length < 6) return vals;
+      const backup = unifyBackup.buttons[idx];
+      if (Array.isArray(backup) && backup.length >= 6) {
+        if (unifyButtonColors && selectedThemeIdx !== CUSTOM_IDX) return [...backup];
+        if (vals[0] === vals[1]) vals[0] = backup[0];
+        if (vals[2] === vals[3]) vals[2] = backup[2];
+        if (vals[5] === vals[4]) vals[5] = backup[5];
+        return vals;
+      }
+      if (Array.isArray(backup) && backup.length >= 3) {
+        if (vals[0] === vals[1]) vals[0] = backup[0];
+        if (vals[2] === vals[3]) vals[2] = backup[1];
+        if (vals[5] === vals[4]) vals[5] = backup[2];
+      }
+      return vals;
     }
 
     // Firmware uses 0 as "unset/default" for per-button custom colors.
@@ -1588,7 +1840,7 @@
     // ── Grid display mirroring ──
     function refreshGridDisplay() {
       const grid = document.getElementById('key-grid');
-      const t = isConnected ? workingTheme : disconnectedTheme;
+      const t = isConnected ? getEffectiveTheme(workingTheme) : disconnectedTheme;
       grid.style.background = rgb565ToHex(t[0]);
       for (let i = 0; i < 16; i++) updateKeyBtn(i);
     }
@@ -1598,8 +1850,8 @@
       if (!b) return;
       const hasMacro = buttonShortcuts[index]?.length > 0;
       const name = buttonNames[index]?.trim();
-      const bc = workingBtnColors[index];
-      const t = isConnected ? workingTheme : disconnectedTheme;
+      const bc = getEffectiveBtnColors(workingBtnColors[index]);
+      const t = isConnected ? getEffectiveTheme(workingTheme) : disconnectedTheme;
       const isCustom = isConnected && (selectedThemeIdx === CUSTOM_IDX);
       let fill, border, text;
       if (hasMacro) {
@@ -1653,18 +1905,27 @@
 
     function selectTheme(idx) {
       selectedThemeIdx = idx;
-      currentThemeId = (idx === CUSTOM_IDX) ? 255 : idx;
       if (idx === CUSTOM_IDX) {
         workingTheme = [...customColors];
         document.getElementById('custom-controls').classList.remove('hidden');
         syncSwatches();
+        if (unifyButtonColors) {
+          unifyBaseThemeIdx = null;
+          saveUnifiedSettings();
+        }
       } else {
         workingTheme = [...presetThemes[idx].c];
         document.getElementById('custom-controls').classList.add('hidden');
+        if (unifyButtonColors) {
+          unifyBaseThemeIdx = idx;
+          saveUnifiedSettings();
+        }
       }
       updateThemeSelection();
+      applyUnifiedUI();
       updateBtnColorSection();
       refreshGridDisplay();
+      if (isConnected) syncBtnCustomMode({ awaitAck: true });
       syncThemeToDevice();
     }
 
@@ -1684,7 +1945,7 @@
     function updateCustomSwatchPreview(colors) {
       const swEl = document.querySelector(`.theme-swatch[data-theme-idx="${CUSTOM_IDX}"]`);
       if (!swEl) return;
-      const t = isConnected ? colors : disconnectedTheme;
+      const t = isConnected ? (isUnifiedMode() ? getUnifiedTheme(colors) : colors) : disconnectedTheme;
       swEl.querySelector('.theme-swatch-inner').style.background = rgb565ToHex(t[0]);
       const cells = swEl.querySelectorAll('.theme-swatch-cell');
       cells[0].style.background = rgb565ToHex(t[2]);
@@ -1707,8 +1968,8 @@
 
     function syncBtnSwatches() {
       if (selectedButton === null) return;
-      const bc = workingBtnColors[selectedButton];
-      const t = workingTheme;
+      const bc = getEffectiveBtnColors(workingBtnColors[selectedButton]);
+      const t = getEffectiveTheme(workingTheme);
       const defaults = [t[2],t[3],t[4],t[5],t[7],t[8]];
       document.querySelectorAll('#btn-color-controls .color-swatch').forEach(sw => {
         const [,slot] = sw.dataset.target.split(':');
@@ -1822,13 +2083,31 @@
       if (parts.length < 10) return;
       currentThemeId = parseInt(parts[0]);
       const colors = []; for (let i=1;i<=9;i++) colors.push(parseInt(parts[i]));
-      if (currentThemeId !== 255 && currentThemeId < presetThemes.length) selectedThemeIdx = currentThemeId;
-      else { selectedThemeIdx = CUSTOM_IDX; customColors = [...colors]; }
-      workingTheme = [...colors]; appliedTheme = [...colors];
+      if (unifyButtonColors && !FIRMWARE_UNIFY) restoreUnifiedTheme(colors);
+      if (currentThemeId !== 255 && currentThemeId < presetThemes.length) {
+        selectedThemeIdx = currentThemeId;
+        workingTheme = [...colors];
+        if (unifyButtonColors) {
+          unifyBaseThemeIdx = selectedThemeIdx;
+          saveUnifiedSettings();
+        }
+      } else {
+        customColors = [...colors];
+        if (unifyButtonColors && unifyBaseThemeIdx !== null && unifyBaseThemeIdx < presetThemes.length) {
+          selectedThemeIdx = unifyBaseThemeIdx;
+          workingTheme = [...presetThemes[unifyBaseThemeIdx].c];
+        } else {
+          selectedThemeIdx = CUSTOM_IDX;
+          workingTheme = [...colors];
+        }
+      }
+      appliedTheme = [...colors];
       updateThemeSelection();
       document.getElementById('custom-controls').classList.toggle('hidden', selectedThemeIdx !== CUSTOM_IDX);
+      applyUnifiedUI();
       if (selectedThemeIdx === CUSTOM_IDX) syncSwatches();
       updateBtnColorSection();
+      if (isConnected) syncBtnCustomMode({ awaitAck: true });
       if (deferGridRender) { pendingGridRefresh = true; return; }
       refreshGridDisplay();
     }
@@ -1836,7 +2115,9 @@
     function parseCustomResponse(data) {
       const vals = data.split(',').map(Number);
       if (vals.length < 9) return;
-      customColors = vals.slice(0, 9);
+      let colors = vals.slice(0, 9);
+      if (unifyButtonColors && !FIRMWARE_UNIFY) restoreUnifiedTheme(colors);
+      customColors = [...colors];
 
       updateCustomSwatchPreview(customColors);
 
@@ -1853,9 +2134,10 @@
       const c1 = data.indexOf(':');
       if (c1 === -1) return;
       const idx = parseInt(data.substring(0, c1));
-      const vals = data.substring(c1+1).split(',').map(Number);
+      let vals = data.substring(c1+1).split(',').map(Number);
       if (idx >= 0 && idx < 16 && vals.length >= 6) {
         const hasAny = vals.some(v => v !== 0);
+        if (unifyButtonColors && !FIRMWARE_UNIFY && hasAny) vals = restoreUnifiedBtnColors(idx, vals);
         workingBtnColors[idx] = hasAny ? [...vals] : null;
         appliedBtnColors[idx] = hasAny ? [...vals] : null;
         rebuildRecentColorsFromMatrix();
@@ -1973,6 +2255,7 @@
     }
 
     // ── Init ──
+    loadUnifiedSettings();
     initThemeGrid();
     initPaletteGrid();
     rebuildRecentColorsFromMatrix();

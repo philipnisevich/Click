@@ -2,8 +2,8 @@
   ShortcutButton - ESP32-S3-DevKitC-1 (N16R8)
 
   A 4x4 button matrix that sends programmable keyboard shortcuts via BLE HID.
-  Use the USB serial connection for the web configurator, and Bluetooth for
-  keyboard shortcut execution.
+  Configure via USB serial or Bluetooth (config GATT service), and use Bluetooth
+  for keyboard shortcut execution.
 
   Hardware:
   - ESP32-S3-DevKitC-1 (WROOM-1-N16R8, 16MB flash, 8MB PSRAM)
@@ -49,6 +49,28 @@ uint16_t bleConnHandle = BLE_HS_CONN_HANDLE_NONE;
 bool bleEncrypted = false;
 
 uint8_t bleKeyReport[8] = {0};
+
+// BLE config channel (Nordic UART Service UUIDs)
+static const char *BLE_CFG_SERVICE_UUID = "6E400001-B5A3-F393-E0A9-E50E24DCCA9E";
+static const char *BLE_CFG_RX_UUID      = "6E400002-B5A3-F393-E0A9-E50E24DCCA9E"; // Write
+static const char *BLE_CFG_TX_UUID      = "6E400003-B5A3-F393-E0A9-E50E24DCCA9E"; // Notify
+NimBLECharacteristic *bleCfgRx = nullptr;
+NimBLECharacteristic *bleCfgTx = nullptr;
+bool bleCfgSubscribed = false;
+uint16_t bleCfgConnHandle = BLE_HS_CONN_HANDLE_NONE;
+
+struct CommandStreamState {
+  bool receiving = false;
+  String buffer;
+};
+
+CommandStreamState serialStream;
+CommandStreamState bleStream;
+
+void handleCommandChar(CommandStreamState &state, char c);
+void sendPacket(const String &packet);
+void sendPacket(const __FlashStringHelper *packet);
+void sendConfigPacket(const String &packet);
 
 // Standard 8-byte keyboard report (raw bytes):
 // [0]=modifiers, [1]=reserved, [2..7]=up to 6 simultaneous keys.
@@ -107,6 +129,24 @@ class ShortcutBleOutputCallbacks : public NimBLECharacteristicCallbacks {
   }
 };
 
+class ShortcutBleConfigTxCallbacks : public NimBLECharacteristicCallbacks {
+  void onSubscribe(NimBLECharacteristic *, NimBLEConnInfo &info, uint16_t subValue) override {
+    bleCfgSubscribed = (subValue != 0);
+    bleCfgConnHandle = bleCfgSubscribed ? info.getConnHandle() : BLE_HS_CONN_HANDLE_NONE;
+  }
+};
+
+class ShortcutBleConfigRxCallbacks : public NimBLECharacteristicCallbacks {
+  void onWrite(NimBLECharacteristic *chr, NimBLEConnInfo &info) override {
+    const std::string val = chr->getValue();
+    if (val.empty()) return;
+    bleCfgConnHandle = info.getConnHandle();
+    for (char c : val) {
+      handleCommandChar(bleStream, c);
+    }
+  }
+};
+
 class ShortcutBleServerCallbacks : public NimBLEServerCallbacks {
   void onConnect(NimBLEServer *, NimBLEConnInfo &info) override {
     bleConnected  = true;
@@ -132,6 +172,10 @@ class ShortcutBleServerCallbacks : public NimBLEServerCallbacks {
     bleDisplayNeedsUpdate = true;
     memset(bleKeyReport, 0, sizeof(bleKeyReport));
     Serial.printf("<BLE:DISCONNECTED:conn=%u:reason=%d>\n", info.getConnHandle(), reason);
+    if (info.getConnHandle() == bleCfgConnHandle) {
+      bleCfgConnHandle = BLE_HS_CONN_HANDLE_NONE;
+      bleCfgSubscribed = false;
+    }
     NimBLEDevice::startAdvertising();
   }
   void onAuthenticationComplete(NimBLEConnInfo &info) override {
@@ -308,6 +352,15 @@ void setupBleKeyboard() {
   bleHid->startServices();
   bleHid->setBatteryLevel(100);
 
+  NimBLEService *cfgService = server->createService(BLE_CFG_SERVICE_UUID);
+  bleCfgRx = cfgService->createCharacteristic(BLE_CFG_RX_UUID,
+    NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::WRITE_NR);
+  bleCfgTx = cfgService->createCharacteristic(BLE_CFG_TX_UUID,
+    NIMBLE_PROPERTY::NOTIFY);
+  bleCfgRx->setCallbacks(new ShortcutBleConfigRxCallbacks());
+  bleCfgTx->setCallbacks(new ShortcutBleConfigTxCallbacks());
+  cfgService->start();
+
   NimBLEAdvertising *adv = NimBLEDevice::getAdvertising();
   adv->setMinInterval(32);   // 20 ms — fast advertising so host reconnects quickly
   adv->setMaxInterval(64);   // 40 ms
@@ -315,6 +368,7 @@ void setupBleKeyboard() {
   adv->addServiceUUID(bleHid->getHidService()->getUUID());
   adv->addServiceUUID(bleHid->getDeviceInfoService()->getUUID());
   adv->addServiceUUID(bleHid->getBatteryService()->getUUID());
+  adv->addServiceUUID(cfgService->getUUID());
   adv->setPreferredParams(0x0006, 0x0012);
   // Advertising is started at the END of setup(), after full initialization,
   // so the host can only connect to a fully-ready device.
@@ -364,6 +418,8 @@ uint16_t customThemeColor[THEME_SLOTS] = {
 // Each button: [0]=cardOff, [1]=cardOn, [2]=bordOff, [3]=bordOn, [4]=txOn, [5]=txOff
 #define BTN_COLOR_SLOTS 6
 uint16_t btnCustom[16][BTN_COLOR_SLOTS] = {{0}};
+bool btnCustomEnabled = false;
+bool unifyButtonColors = false;
 
 // Preset themes (PROGMEM): {bg, hdr, cardOff, cardOn, bordOff, bordOn, numDim, txOn, txOff}
 const PROGMEM uint16_t presetThemes[][THEME_SLOTS] = {
@@ -695,8 +751,6 @@ unsigned long lastDebounceTime[NUM_BUTTONS];
 // Serial communication
 const char CMD_START = '<';
 const char CMD_END = '>';
-String serialBuffer = "";
-bool receiving = false;
 
 void getStorageKey(int btnIdx, char *keyOut, size_t keyOutLen) {
   snprintf(keyOut, keyOutLen, "b%02d", btnIdx);
@@ -878,6 +932,8 @@ void setup() {
 #if defined(ARDUINO_USB_MODE) && (ARDUINO_USB_MODE == 0)
   USB.begin();
 #endif
+  serialStream.buffer.reserve(256);
+  bleStream.buffer.reserve(256);
 
   // Load remaining data from NVS
   if (storageReady) {
@@ -886,7 +942,7 @@ void setup() {
     loadAllBtnColorsFromNVS();
   }
 
-  Serial.println(storageReady ? F("<READY>") : F("<READY_NOSD>"));
+  sendPacket(storageReady ? F("<READY>") : F("<READY_NOSD>"));
 
   // Draw initial grid
   drawButtonGrid();
@@ -953,9 +1009,10 @@ void scanMatrix() {
           buttonState[buttonIndex] = reading;
 
           if (buttonState[buttonIndex] == LOW) {
-            Serial.print("<PRESSED:");
-            Serial.print(buttonIndex);
-            Serial.println(">");
+            String msg = "<PRESSED:";
+            msg += buttonIndex;
+            msg += ">";
+            sendPacket(msg);
             executeShortcut(buttonIndex);
           }
         }
@@ -1014,12 +1071,13 @@ void loadThemeFromNVS() {
 }
 
 void sendCustomTheme() {
-  Serial.print(F("<CUSTOM:"));
+  String msg = F("<CUSTOM:");
   for (int i = 0; i < THEME_SLOTS; i++) {
-    if (i) Serial.print(',');
-    Serial.print(customThemeColor[i]);
+    if (i) msg += ',';
+    msg += customThemeColor[i];
   }
-  Serial.println(F(">"));
+  msg += '>';
+  sendPacket(msg);
 }
 
 void saveBtnColorToNVS(int idx) {
@@ -1094,36 +1152,69 @@ void swapButtons(int a, int b) {
   updateButtonDisplay(b);
 }
 
+void handleCommandChar(CommandStreamState &state, char c) {
+  if (c == CMD_START) {
+    state.receiving = true;
+    state.buffer = "";
+  } else if (c == CMD_END && state.receiving) {
+    state.receiving = false;
+    processCommand(state.buffer);
+    state.buffer = "";
+  } else if (state.receiving) {
+    state.buffer += c;
+    if (state.buffer.length() > 512) {
+      // Malformed packet — no closing '>' after 512 chars; discard to prevent OOM.
+      state.receiving = false;
+      state.buffer = "";
+    }
+  }
+}
+
+void sendConfigPacket(const String &packet) {
+  if (!bleCfgTx || !bleCfgSubscribed || packet.length() == 0) return;
+  const char *data = packet.c_str();
+  size_t len = packet.length();
+  const size_t chunkSize = 20; // safe default for BLE notifications
+  for (size_t i = 0; i < len; i += chunkSize) {
+    size_t n = len - i;
+    if (n > chunkSize) n = chunkSize;
+    bool sent = false;
+    if (bleCfgConnHandle != BLE_HS_CONN_HANDLE_NONE) {
+      sent = bleCfgTx->notify((uint8_t *)(data + i), n, bleCfgConnHandle);
+    }
+    if (!sent) {
+      bleCfgTx->setValue((uint8_t *)(data + i), n);
+      bleCfgTx->notify();
+    }
+    delay(2);
+  }
+}
+
+void sendPacket(const String &packet) {
+  Serial.println(packet);
+  sendConfigPacket(packet);
+}
+
+void sendPacket(const __FlashStringHelper *packet) {
+  String msg(packet);
+  sendPacket(msg);
+}
+
 void handleSerial() {
   while (Serial.available() > 0) {
     char c = Serial.read();
-
-    if (c == CMD_START) {
-      receiving = true;
-      serialBuffer = "";
-    } else if (c == CMD_END && receiving) {
-      receiving = false;
-      processCommand(serialBuffer);
-      serialBuffer = "";
-    } else if (receiving) {
-      serialBuffer += c;
-      if (serialBuffer.length() > 512) {
-        // Malformed packet — no closing '>' after 512 chars; discard to prevent OOM.
-        receiving = false;
-        serialBuffer = "";
-      }
-    }
+    handleCommandChar(serialStream, c);
   }
 }
 
 void processCommand(String cmd) {
   if (cmd.startsWith("STEPS:")) {
     int firstColon = cmd.indexOf(':', 6);
-    if (firstColon == -1) { Serial.println(F("<ERROR:NO_COLON>")); return; }
+    if (firstColon == -1) { sendPacket(F("<ERROR:NO_COLON>")); return; }
     int btnIdx = cmd.substring(6, firstColon).toInt();
     int secondColon = cmd.indexOf(':', firstColon + 1);
-    if (secondColon == -1) { Serial.println(F("<ERROR:NO_SECOND_COLON>")); return; }
-    if (btnIdx < 0 || btnIdx >= NUM_BUTTONS) { Serial.println(F("<ERROR:BAD_BTN>")); return; }
+    if (secondColon == -1) { sendPacket(F("<ERROR:NO_SECOND_COLON>")); return; }
+    if (btnIdx < 0 || btnIdx >= NUM_BUTTONS) { sendPacket(F("<ERROR:BAD_BTN>")); return; }
 
     String name = cmd.substring(firstColon + 1, secondColon);
     String data = cmd.substring(secondColon + 1);
@@ -1134,7 +1225,7 @@ void processCommand(String cmd) {
     currentName[nameLen] = '\0';
 
     parseSteps(btnIdx, data);
-    Serial.println(F("<OK>"));
+    sendPacket(F("<OK>"));
   } else if (cmd.startsWith("GET:")) {
     int btnIdx = cmd.substring(4).toInt();
     if (btnIdx >= 0 && btnIdx < NUM_BUTTONS) sendShortcut(btnIdx);
@@ -1144,23 +1235,26 @@ void processCommand(String cmd) {
     int btnIdx = cmd.substring(6).toInt();
     if (btnIdx >= 0 && btnIdx < NUM_BUTTONS) {
       clearShortcut(btnIdx);
-      Serial.println("<CLEARED>");
+      sendPacket(F("<CLEARED>"));
     }
   } else if (cmd == "CLEARALL") {
     for (int i = 0; i < NUM_BUTTONS; i++) clearShortcut(i);
-    Serial.println("<CLEAREDALL>");
+    sendPacket(F("<CLEAREDALL>"));
   } else if (cmd == "PING") {
-    Serial.println("<PONG>");
+    sendPacket(F("<PONG>"));
   } else if (cmd == "SDSTATUS") {
-    Serial.println(storageReady ? "<SD:OK>" : "<SD:ERROR>");
-    Serial.println(bleReadyForReports() ? "<KB:OK>" : "<KB:FAIL>");
+    sendPacket(storageReady ? F("<SD:OK>") : F("<SD:ERROR>"));
+    sendPacket(bleReadyForReports() ? F("<KB:OK>") : F("<KB:FAIL>"));
   } else if (cmd == "KBTEST") {
-    Serial.print(F("<KBTEST:BLE="));
-    Serial.print(bleReadyForReports() ? "1" : "0");
-    Serial.println(F(">"));
+    {
+      String msg = F("<KBTEST:BLE=");
+      msg += (bleReadyForReports() ? "1" : "0");
+      msg += ">";
+      sendPacket(msg);
+    }
 
     if (!waitForBleConnection(1500)) {
-      Serial.println(F("<KBTEST:NO_BLE>"));
+      sendPacket(F("<KBTEST:NO_BLE>"));
       return;
     }
 
@@ -1169,17 +1263,18 @@ void processCommand(String cmd) {
     for (int i = 0; hello[i] != '\0'; i++) {
       bleTypeChar(hello[i]);
     }
-    Serial.println(F("<KBTEST:DONE>"));
+    sendPacket(F("<KBTEST:DONE>"));
   } else if (cmd.startsWith("TEST:")) {
     int btnIdx = cmd.substring(5).toInt();
     if (btnIdx >= 0 && btnIdx < NUM_BUTTONS) {
       executeShortcut(btnIdx);
-      Serial.println("<TESTED>");
+      sendPacket(F("<TESTED>"));
     }
   } else if (cmd == "GETNAME") {
-    Serial.print(F("<NAME:"));
-    Serial.print(bleName);
-    Serial.println(F(">"));
+    String msg = F("<NAME:");
+    msg += bleName;
+    msg += ">";
+    sendPacket(msg);
   } else if (cmd.startsWith("SETNAME:")) {
     String newName = cmd.substring(8);
     newName.trim();
@@ -1189,15 +1284,15 @@ void processCommand(String cmd) {
         devicePrefs.putString("name", newName.c_str());
         devicePrefs.end();
       }
-      Serial.println(F("<NAME_SET>"));
+      sendPacket(F("<NAME_SET>"));
       delay(100);
       ESP.restart();
     } else {
-      Serial.println(F("<ERROR:BAD_NAME>"));
+      sendPacket(F("<ERROR:BAD_NAME>"));
     }
   } else if (cmd == "CLEARBONDS") {
     NimBLEDevice::deleteAllBonds();
-    Serial.println(F("<BONDS_CLEARED>"));
+    sendPacket(F("<BONDS_CLEARED>"));
   } else if (cmd.startsWith("SETTHEME:")) {
     int id = cmd.substring(9).toInt();
     if (id >= 0 && id < NUM_PRESETS) {
@@ -1206,9 +1301,9 @@ void processCommand(String cmd) {
         themeColor[i] = pgm_read_word(&presetThemes[id][i]);
       saveThemeToNVS();
       drawButtonGrid();
-      Serial.println(F("<THEME_SET>"));
+      sendPacket(F("<THEME_SET>"));
     } else {
-      Serial.println(F("<ERROR:BAD_THEME>"));
+      sendPacket(F("<ERROR:BAD_THEME>"));
     }
   } else if (cmd.startsWith("SETCOLORS:")) {
     // Format: SETCOLORS:bg,hdr,cardOff,cardOn,bordOff,bordOn,numDim,txtDark
@@ -1230,9 +1325,9 @@ void processCommand(String cmd) {
       }
       saveThemeToNVS();
       drawButtonGrid();
-      Serial.println(F("<COLORS_SET>"));
+      sendPacket(F("<COLORS_SET>"));
     } else {
-      Serial.println(F("<ERROR:BAD_COLORS>"));
+      sendPacket(F("<ERROR:BAD_COLORS>"));
     }
   } else if (cmd.startsWith("BTNCOLOR:")) {
     // Format: BTNCOLOR:idx:cOff,cOn,bOff,bOn,tOn,tOff (6 values)
@@ -1253,7 +1348,7 @@ void processCommand(String cmd) {
           for (int i = 0; i < BTN_COLOR_SLOTS; i++) btnCustom[idx][i] = parsed[i];
           saveBtnColorToNVS(idx);
           updateButtonDisplay(idx);
-          Serial.println(F("<BTNCOLOR_SET>"));
+          sendPacket(F("<BTNCOLOR_SET>"));
         }
       }
     }
@@ -1262,11 +1357,23 @@ void processCommand(String cmd) {
     showButtonNumbers = (v != 0);
     saveThemeToNVS();
     drawButtonGrid();
-    Serial.println(F("<NUMS_SET>"));
+    sendPacket(F("<NUMS_SET>"));
+  } else if (cmd.startsWith("SETBTNCUSTOM:")) {
+    int v = cmd.substring(13).toInt();
+    btnCustomEnabled = (v != 0);
+    sendPacket(F("<BTNCUSTOM_SET>"));
+  } else if (cmd.startsWith("SETUNIFY:")) {
+    int v = cmd.substring(9).toInt();
+    unifyButtonColors = (v != 0);
+    for (int i = 0; i < NUM_BUTTONS; i++) {
+      updateButtonDisplay(i);
+    }
+    sendPacket(F("<UNIFY_SET>"));
   } else if (cmd == "GETNUMS") {
-    Serial.print(F("<NUMS:"));
-    Serial.print(showButtonNumbers ? 1 : 0);
-    Serial.println(F(">"));
+    String msg = F("<NUMS:");
+    msg += (showButtonNumbers ? 1 : 0);
+    msg += ">";
+    sendPacket(msg);
   } else if (cmd.startsWith("SWAP:")) {
     int comma = cmd.indexOf(',', 5);
     if (comma != -1) {
@@ -1274,36 +1381,39 @@ void processCommand(String cmd) {
       int b = cmd.substring(comma + 1).toInt();
       if (a >= 0 && a < NUM_BUTTONS && b >= 0 && b < NUM_BUTTONS && a != b) {
         swapButtons(a, b);
-        Serial.println(F("<SWAPPED>"));
+        sendPacket(F("<SWAPPED>"));
       }
     }
   } else if (cmd == "GETTHEME") {
-    Serial.print(F("<THEME:"));
-    Serial.print(currentThemeId);
+    String msg = F("<THEME:");
+    msg += currentThemeId;
     for (int i = 0; i < THEME_SLOTS; i++) {
-      Serial.print(',');
-      Serial.print(themeColor[i]);
+      msg += ',';
+      msg += themeColor[i];
     }
-    Serial.println(F(">"));
+    msg += '>';
+    sendPacket(msg);
     sendCustomTheme();
     // Also send per-button colors (6 values each)
     for (int i = 0; i < NUM_BUTTONS; i++) {
       bool hasCustom = false;
       for (int j = 0; j < BTN_COLOR_SLOTS; j++) if (btnCustom[i][j]) { hasCustom = true; break; }
       if (hasCustom) {
-        Serial.print(F("<BTNCOLOR:"));
-        Serial.print(i);
-        Serial.print(':');
+        String btnMsg = F("<BTNCOLOR:");
+        btnMsg += i;
+        btnMsg += ':';
         for (int j = 0; j < BTN_COLOR_SLOTS; j++) {
-          if (j) Serial.print(',');
-          Serial.print(btnCustom[i][j]);
+          if (j) btnMsg += ',';
+          btnMsg += btnCustom[i][j];
         }
-        Serial.println(F(">"));
+        btnMsg += '>';
+        sendPacket(btnMsg);
       }
     }
-    Serial.print(F("<NUMS:"));
-    Serial.print(showButtonNumbers ? 1 : 0);
-    Serial.println(F(">"));
+    String numsMsg = F("<NUMS:");
+    numsMsg += (showButtonNumbers ? 1 : 0);
+    numsMsg += '>';
+    sendPacket(numsMsg);
   } else if (cmd == "GETCUSTOM") {
     sendCustomTheme();
   }
@@ -1389,7 +1499,7 @@ void parseStep(String stepStr) {
 
 void saveShortcut(int btnIdx) {
   if (!storageReady) {
-    Serial.println(F("<DEBUG:Save failed - no storage>"));
+    sendPacket(F("<DEBUG:Save failed - no storage>"));
     return;
   }
 
@@ -1407,11 +1517,11 @@ void saveShortcut(int btnIdx) {
   uint8_t blob[SHORTCUT_BLOB_MAX];
   size_t blobLen = 0;
   if (!serializeCurrentShortcut(blob, sizeof(blob), blobLen)) {
-    Serial.println(F("<DEBUG:Save failed - serialize error>"));
+    sendPacket(F("<DEBUG:Save failed - serialize error>"));
     return;
   }
   if (prefs.putBytes(key, blob, blobLen) != blobLen) {
-    Serial.println(F("<DEBUG:Save failed - write error>"));
+    sendPacket(F("<DEBUG:Save failed - write error>"));
     return;
   }
 
@@ -1484,14 +1594,26 @@ void drawSingleButton(int btnIdx) {
   // Resolve colors. Per-button custom colors only apply in custom theme (id=255).
   uint16_t borderClr, fillClr, txtClr;
   bool isCustom = (currentThemeId == 255);
+  bool useBtnCustom = isCustom || btnCustomEnabled;
+  uint16_t fillOn   = (useBtnCustom && btnCustom[btnIdx][1]) ? btnCustom[btnIdx][1] : CARD_ON;
+  uint16_t borderOn = (useBtnCustom && btnCustom[btnIdx][3]) ? btnCustom[btnIdx][3] : BORD_ON;
+  uint16_t txtOn    = (useBtnCustom && btnCustom[btnIdx][4]) ? btnCustom[btnIdx][4] : TXON;
+  uint16_t fillOff   = (useBtnCustom && btnCustom[btnIdx][0]) ? btnCustom[btnIdx][0] : CARD_OFF;
+  uint16_t borderOff = (useBtnCustom && btnCustom[btnIdx][2]) ? btnCustom[btnIdx][2] : BORD_OFF;
+  uint16_t txtOff    = (useBtnCustom && btnCustom[btnIdx][5]) ? btnCustom[btnIdx][5] : TXOFF;
+
   if (buttonHasShortcut[btnIdx]) {
-    fillClr   = (isCustom && btnCustom[btnIdx][1]) ? btnCustom[btnIdx][1] : CARD_ON;
-    borderClr = (isCustom && btnCustom[btnIdx][3]) ? btnCustom[btnIdx][3] : BORD_ON;
-    txtClr    = (isCustom && btnCustom[btnIdx][4]) ? btnCustom[btnIdx][4] : TXON;
+    fillClr = fillOn;
+    borderClr = borderOn;
+    txtClr = txtOn;
+  } else if (unifyButtonColors) {
+    fillClr = fillOn;
+    borderClr = borderOn;
+    txtClr = txtOn;
   } else {
-    fillClr   = (isCustom && btnCustom[btnIdx][0]) ? btnCustom[btnIdx][0] : CARD_OFF;
-    borderClr = (isCustom && btnCustom[btnIdx][2]) ? btnCustom[btnIdx][2] : BORD_OFF;
-    txtClr    = (isCustom && btnCustom[btnIdx][5]) ? btnCustom[btnIdx][5] : TXOFF;
+    fillClr = fillOff;
+    borderClr = borderOff;
+    txtClr = txtOff;
   }
   tftFillRoundRect(x,     y,     BTN_SIZE,     BTN_SIZE,     BTN_RADIUS,     borderClr);
   tftFillRoundRect(x + 1, y + 1, BTN_SIZE - 2, BTN_SIZE - 2, BTN_RADIUS - 1, fillClr);
@@ -1585,29 +1707,30 @@ void encodeBase64(const char* input, int len, String& output) {
 void sendShortcut(int btnIdx) {
   loadShortcut(btnIdx);
 
-  Serial.print(F("<STEPS:"));
-  Serial.print(btnIdx);
-  Serial.print(F(":"));
-  Serial.print(buttonNames[btnIdx]);
-  Serial.print(F(":"));
+  String msg = F("<STEPS:");
+  msg += btnIdx;
+  msg += ":";
+  msg += buttonNames[btnIdx];
+  msg += ":";
 
   for (int i = 0; i < currentStepCount; i++) {
-    Serial.print(currentSteps[i].action);
-    Serial.print(F(","));
-    Serial.print(currentSteps[i].keyType);
-    Serial.print(F(","));
-    Serial.print(currentSteps[i].keyCode);
+    msg += currentSteps[i].action;
+    msg += ",";
+    msg += currentSteps[i].keyType;
+    msg += ",";
+    msg += currentSteps[i].keyCode;
 
     if (currentSteps[i].action == STEP_TYPE) {
-      Serial.print(F(","));
+      msg += ",";
       String b64;
       encodeBase64(currentTextBuffer + currentSteps[i].keyCode, currentSteps[i].textLen, b64);
-      Serial.print(b64);
+      msg += b64;
     }
 
-    if (i < currentStepCount - 1) Serial.print(F(";"));
+    if (i < currentStepCount - 1) msg += ";";
   }
-  Serial.println(F(">"));
+  msg += ">";
+  sendPacket(msg);
 }
 
 void sendAllShortcuts() {
@@ -1617,44 +1740,52 @@ void sendAllShortcuts() {
     yield();
   }
   Serial.flush();
-  Serial.println("<DONE>");
+  sendPacket(F("<DONE>"));
 }
 
 void executeShortcut(int btnIdx) {
   if (!loadShortcut(btnIdx)) {
-    Serial.print(F("<EXEC_FAIL:"));
-    Serial.print(btnIdx);
-    Serial.println(F(":NO_FILE>"));
+    String msg = F("<EXEC_FAIL:");
+    msg += btnIdx;
+    msg += F(":NO_FILE>");
+    sendPacket(msg);
     return;
   }
 
   if (!waitForBleConnection(1500)) {
-    Serial.print(F("<EXEC_FAIL:"));
-    Serial.print(btnIdx);
-    Serial.println(F(":BLE_NOT_CONNECTED>"));
+    String msg = F("<EXEC_FAIL:");
+    msg += btnIdx;
+    msg += F(":BLE_NOT_CONNECTED>");
+    sendPacket(msg);
     return;
   }
 
-  Serial.print(F("<EXEC:"));
-  Serial.print(btnIdx);
-  Serial.print(F(":"));
-  Serial.print(currentStepCount);
-  Serial.println(F(">"));
+  {
+    String msg = F("<EXEC:");
+    msg += btnIdx;
+    msg += ":";
+    msg += currentStepCount;
+    msg += ">";
+    sendPacket(msg);
+  }
 
   for (int i = 0; i < currentStepCount; i++) {
     byte action = currentSteps[i].action;
     byte keyType = currentSteps[i].keyType;
     byte keyCode = currentSteps[i].keyCode;
 
-    Serial.print(F("<STEP:"));
-    Serial.print(i);
-    Serial.print(F(",a="));
-    Serial.print(action);
-    Serial.print(F(",t="));
-    Serial.print(keyType);
-    Serial.print(F(",k="));
-    Serial.print(keyCode);
-    Serial.println(F(">"));
+    {
+      String msg = F("<STEP:");
+      msg += i;
+      msg += F(",a=");
+      msg += action;
+      msg += F(",t=");
+      msg += keyType;
+      msg += F(",k=");
+      msg += keyCode;
+      msg += ">";
+      sendPacket(msg);
+    }
 
     if (action == STEP_TYPE) {
       int textStart = keyCode;
