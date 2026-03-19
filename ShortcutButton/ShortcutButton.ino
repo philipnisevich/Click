@@ -1032,6 +1032,7 @@ void saveThemeToNVS() {
   if (!dp.begin("display", false)) return;
   dp.putUChar("tid", currentThemeId);
   dp.putBool("nums", showButtonNumbers);
+  dp.putBool("unify", unifyButtonColors);
   dp.putBytes("ccols", (uint8_t *)customThemeColor, THEME_SLOTS * 2);
   if (currentThemeId == 255) {
     dp.putBytes("cols", (uint8_t *)themeColor, THEME_SLOTS * 2);
@@ -1044,6 +1045,7 @@ void loadThemeFromNVS() {
   if (!dp.begin("display", true)) return;
   currentThemeId = dp.getUChar("tid", 0);
   showButtonNumbers = dp.getBool("nums", true);
+  unifyButtonColors = dp.getBool("unify", false);
   size_t customLen = dp.getBytesLength("ccols");
   if (customLen == THEME_SLOTS * 2) {
     dp.getBytes("ccols", (uint8_t *)customThemeColor, THEME_SLOTS * 2);
@@ -1364,9 +1366,13 @@ void processCommand(String cmd) {
     sendPacket(F("<BTNCUSTOM_SET>"));
   } else if (cmd.startsWith("SETUNIFY:")) {
     int v = cmd.substring(9).toInt();
-    unifyButtonColors = (v != 0);
-    for (int i = 0; i < NUM_BUTTONS; i++) {
-      updateButtonDisplay(i);
+    bool newVal = (v != 0);
+    if (newVal != unifyButtonColors) {
+      unifyButtonColors = newVal;
+      for (int i = 0; i < NUM_BUTTONS; i++) {
+        updateButtonDisplay(i);
+      }
+      saveThemeToNVS();
     }
     sendPacket(F("<UNIFY_SET>"));
   } else if (cmd == "GETNUMS") {
