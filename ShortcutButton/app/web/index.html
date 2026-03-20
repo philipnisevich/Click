@@ -492,7 +492,7 @@
       <main class="editor">
         <div id="editor-empty" class="editor-empty">
           <div class="editor-empty-icon">⌨</div>
-          <div>Select a button to edit its macro</div>
+          <div>Connect a device to edit macros</div>
         </div>
 
         <!-- Reorder mode overlay -->
@@ -649,6 +649,7 @@
     let deferGridRender = false;
     let pendingGridRefresh = false;
     let readableStreamClosed, writableStreamClosed;
+    const DISCONNECTED_SWATCH_HEX = '#000000';
 
     const UNIFY_STORAGE_KEY = 'sb_unify_button_colors';
     const UNIFY_BACKUP_KEY = 'sb_unify_button_colors_backup';
@@ -1371,6 +1372,7 @@
       document.getElementById('editor-content').classList.add('hidden');
       const bcc = document.getElementById('btn-color-controls');
       if (bcc) bcc.style.display = 'none';
+      applyDisconnectedSwatches();
       updateConnectionUI(false);
     }
 
@@ -1382,8 +1384,21 @@
       document.getElementById('disconnect-btn').disabled = !connected;
       document.getElementById('clear-all-btn').disabled  = !connected;
       document.getElementById('reorder-btn').disabled   = !connected;
+      if (!connected) applyDisconnectedSwatches();
       updateCustomSwatchPreview(customColors);
       updateToolbar();
+    }
+
+    function applyDisconnectedSwatches() {
+      document.querySelectorAll('#custom-controls .color-swatch, #btn-color-controls .color-swatch')
+        .forEach(sw => { sw.style.background = DISCONNECTED_SWATCH_HEX; });
+      const swEl = document.querySelector(`.theme-swatch[data-theme-idx="${CUSTOM_IDX}"]`);
+      if (!swEl) return;
+      swEl.querySelector('.theme-swatch-inner').style.background = DISCONNECTED_SWATCH_HEX;
+      swEl.querySelectorAll('.theme-swatch-cell').forEach(cell => {
+        cell.style.background = DISCONNECTED_SWATCH_HEX;
+        cell.style.borderColor = DISCONNECTED_SWATCH_HEX;
+      });
     }
 
     function showLoadingOverlay() {
@@ -1455,12 +1470,13 @@
         log('Cleared','warning');
         if (selectedButton !== null) {
           buttonShortcuts[selectedButton]=[]; buttonNames[selectedButton]='';
-          commandSteps=[]; renderSteps(); updateKeyBtn(selectedButton); updateToolbar();
+          commandSteps=[]; renderSteps(); setDisplayName(''); updateKeyBtn(selectedButton); updateToolbar();
         }
       }
       else if (msg==='CLEAREDALL') {
         log('All cleared','warning');
         for(let i=0;i<16;i++){buttonShortcuts[i]=[];buttonNames[i]='';updateKeyBtn(i);}
+        if (selectedButton !== null) setDisplayName('');
         commandSteps=[]; renderSteps(); updateToolbar();
       }
       else if (msg==='DONE')   {
